@@ -1,0 +1,819 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BDDM - Download Manager</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%233b82f6'/%3E%3Cpath d='M32 14v26m-11-11 11 11 11-11M18 48h28' stroke='white' stroke-width='6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #14161b; --panel: #1c1f26; --panel2: #232733; --line: #2e3340;
+    --text: #e6e8ee; --muted: #8b93a7; --accent: #3b82f6; --accent2: #2563eb;
+    --ok: #22c55e; --warn: #f59e0b; --bad: #ef4444;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { background: var(--bg); color: var(--text); font: 14px/1.4 "Segoe UI", system-ui, -apple-system, sans-serif; display: flex; flex-direction: column; }
+  button { font: inherit; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  button:hover { border-color: #49506a; background: #2a2f3d; }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button.primary:hover { background: var(--accent2); }
+  button.danger:hover { border-color: var(--bad); color: #fca5a5; }
+  button.small { padding: 4px 10px; font-size: 13px; }
+  select { font: inherit; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; outline: none; }
+  input[type=text], input[type=number], input[type=search] { font: inherit; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 9px 12px; outline: none; }
+  input:focus { border-color: var(--accent); }
+
+  header { display: flex; align-items: center; gap: 18px; padding: 12px 20px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  .logo { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 17px; letter-spacing: .5px; }
+  .logo svg { width: 26px; height: 26px; }
+  nav { display: flex; gap: 4px; }
+  nav button { background: transparent; border-color: transparent; color: var(--muted); }
+  nav button.active { background: var(--panel2); border-color: var(--line); color: var(--text); }
+  .spacer { flex: 1; }
+
+  main { flex: 1; overflow: auto; padding: 18px 20px 40px; }
+  .addbar { display: flex; gap: 10px; margin-bottom: 18px; }
+  .addbar input { flex: 1; }
+  .addbar button { padding: 0 22px; }
+
+  .empty { color: var(--muted); text-align: center; padding: 60px 0; }
+  .item { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; }
+  .row1 { display: flex; align-items: center; gap: 10px; }
+  .name { font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .badge { font-size: 12px; padding: 2px 9px; border-radius: 99px; background: var(--panel2); color: var(--muted); border: 1px solid var(--line); white-space: nowrap; }
+  .badge.Downloading { color: #93c5fd; border-color: #1e3a8a; background: #172554; }
+  .badge.Done { color: #86efac; border-color: #14532d; background: #052e16; }
+  .badge.Error { color: #fca5a5; border-color: #7f1d1d; background: #450a0a; }
+  .badge.ViewOnly { color: #c4b5fd; border-color: #4c1d95; background: #1e1036; }
+  .subhead { display: flex; align-items: center; gap: 8px; padding: 6px 4px; color: var(--text); font-weight: 600; cursor: pointer; user-select: none; }
+  .subhead .count { font-weight: 400; }
+  .subhead .arrow { color: var(--muted); width: 12px; display: inline-block; }
+  .badge.Paused { color: #fcd34d; border-color: #78350f; background: #2b1a05; }
+  .bar { height: 6px; background: var(--panel2); border-radius: 99px; overflow: hidden; margin: 10px 0 8px; }
+  .bar > div { height: 100%; width: 0; background: var(--accent); border-radius: 99px; transition: width .4s; }
+  .bar.Done > div { background: var(--ok); }
+  .bar.Error > div { background: var(--bad); }
+  .bar.Paused > div { background: var(--warn); }
+  .bar.unknown > div { width: 30% !important; animation: slide 1.2s infinite linear; }
+  @keyframes slide { from { margin-left: -30%; } to { margin-left: 100%; } }
+  .row2 { display: flex; align-items: center; gap: 16px; color: var(--muted); font-size: 13px; flex-wrap: wrap; }
+  .row2 .stats { display: flex; gap: 16px; flex: 1; flex-wrap: wrap; }
+  .row2 .actions { display: flex; gap: 6px; }
+  .msg { color: var(--muted); font-size: 12px; margin-top: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .msg.err { color: #fca5a5; white-space: normal; }
+  .msg .fix { display: block; color: var(--text); opacity: .85; margin-top: 3px; }
+  .msg .details { display: block; opacity: .6; font-size: 11px; margin-top: 3px; cursor: help; }
+  .msg.ok { color: #86efac; }
+  .msg.net { color: #fcd34d; white-space: normal; }
+  .morebox { display: flex; flex-direction: column; gap: 6px; margin: -6px 0 14px; font-size: 12px; color: var(--muted); }
+  .morebox textarea, .morebox input { width: 100%; box-sizing: border-box; font: 13px/1.4 Consolas, monospace; }
+
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .4px; }
+  td.url { color: var(--muted); font-size: 12px; word-break: break-all; max-width: 380px; }
+  .toolbar { display: flex; gap: 10px; margin-bottom: 14px; }
+  .toolbar input { flex: 1; }
+
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px; max-width: 640px; }
+  .field { margin-bottom: 16px; }
+  .field label { display: block; font-weight: 600; margin-bottom: 6px; }
+  .field .hint { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  .field .line { display: flex; gap: 8px; }
+  .catrow { display: grid; grid-template-columns: 100px 1fr; gap: 6px 10px; align-items: center; padding: 8px 0; border-top: 1px solid var(--line, #2a2f3a); }
+  .catrow .catname { font-weight: 600; }
+  .catrow .line { display: flex; gap: 8px; }
+  .catrow .line input { flex: 1; min-width: 0; }
+  .catrow .catexts { grid-column: 2; font-size: 12px; opacity: .85; }
+  .field .line input[type=text] { flex: 1; }
+  .field input[type=number] { width: 110px; }
+
+  .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: none; align-items: center; justify-content: center; z-index: 10; }
+  .overlay.show { display: flex; }
+  .dialog { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 20px; width: min(440px, 92vw); box-shadow: 0 20px 50px rgba(0,0,0,.5); }
+  .dialog h3 { margin: 0 0 8px; font-size: 16px; }
+  .dialog p { margin: 0 0 14px; color: var(--muted); word-break: break-word; }
+  .dialog .btns { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+  .check { display: flex; gap: 8px; align-items: center; }
+
+  #toasts { position: fixed; right: 18px; bottom: 18px; display: flex; flex-direction: column; gap: 8px; z-index: 20; }
+  .toast { background: var(--panel2); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 10px; padding: 10px 14px; min-width: 260px; max-width: 380px; box-shadow: 0 10px 30px rgba(0,0,0,.4); animation: pop .2s; }
+  .toast.ok { border-left-color: var(--ok); } .toast.bad { border-left-color: var(--bad); }
+  .toast b { display: block; margin-bottom: 2px; }
+  .toast span { color: var(--muted); font-size: 13px; word-break: break-word; }
+  @keyframes pop { from { transform: translateY(10px); opacity: 0; } }
+  .item.group { border-color: #33405c; }
+  .group .name .ficon { display: inline-block; width: 18px; height: 14px; margin-right: 8px; vertical-align: -1px; background: #f5c451; border-radius: 2px 3px 3px 3px; position: relative; }
+  .group .name .ficon::before { content: ""; position: absolute; left: 0; top: -3px; width: 8px; height: 4px; background: #f5c451; border-radius: 2px 2px 0 0; }
+  .count { color: var(--muted); font-size: 13px; white-space: nowrap; }
+  .toggle { background: transparent; border: none; color: var(--muted); padding: 0 4px; font-size: 13px; }
+  .toggle:hover { background: transparent; color: var(--text); }
+  .group .name { cursor: pointer; }
+  .children { margin: 10px 0 0 22px; border-left: 2px solid var(--line); padding-left: 12px; }
+  .children .item { padding: 8px 10px; margin-bottom: 6px; background: var(--panel2); }
+  .children .bar { margin: 6px 0 5px; height: 4px; }
+  .toast .times { color: var(--muted); font-weight: 400; margin-left: 6px; }
+  #offline { display: none; background: #450a0a; color: #fecaca; padding: 8px 20px; text-align: center; }
+  #offline.show { display: block; }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">
+    <svg viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#3b82f6"/><path d="M32 14v26m-11-11 11 11 11-11M18 48h28" stroke="white" stroke-width="6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    BDDM
+  </div>
+  <nav>
+    <button data-tab="downloads" class="active">Downloads</button>
+    <button data-tab="settings">Settings</button>
+  </nav>
+  <div class="spacer"></div>
+  <button id="openDir" title="Open the downloads folder">Open downloads folder</button>
+  <button id="quitBtn" class="danger" title="Pause all downloads and close BDDM">Quit</button>
+</header>
+<div id="offline">BDDM is not running. Start it again to continue.</div>
+
+<main>
+  <section id="tab-downloads">
+    <div class="addbar">
+      <input id="url" type="text" placeholder="Paste a download or video link here (https://...)" autocomplete="off" spellcheck="false">
+      <button id="addBtn" class="primary">Download</button>
+      <button id="moreBtn" title="Mirror links and checksum">Options</button>
+    </div>
+    <div id="moreBox" class="morebox" hidden>
+      <label for="mirrors">Mirror links (optional): other links to the same file, one per line. BDDM downloads pieces from all of them at once.</label>
+      <textarea id="mirrors" rows="3" spellcheck="false" placeholder="https://mirror1.example.com/file.iso"></textarea>
+      <label for="hash">Checksum (optional): MD5, SHA-1, SHA-256 or SHA-512 from the website. BDDM checks the file when it is done.</label>
+      <input id="hash" type="text" spellcheck="false" autocomplete="off" placeholder="sha256:3a7bd3e2360a3d...">
+    </div>
+    <div id="list"></div>
+    <div id="emptyList" class="empty">No downloads yet. Paste a link above and press Download.</div>
+  </section>
+
+  <section id="tab-settings" hidden>
+    <div class="card">
+      <div class="field">
+        <label for="setDir">Download folder</label>
+        <div class="line">
+          <input id="setDir" type="text" spellcheck="false">
+          <button id="browseDir">Browse...</button>
+        </div>
+        <div class="hint">New downloads are saved here.</div>
+      </div>
+      <div class="field">
+        <label for="setParts">Parts per download</label>
+        <input id="setParts" type="number" min="1" max="32">
+        <div class="hint">How many connections one file uses (1-32). 8 is a good choice.</div>
+      </div>
+      <div class="field">
+        <label for="setActive">Downloads at the same time</label>
+        <input id="setActive" type="number" min="1" max="10">
+        <div class="hint">Extra downloads wait in the queue (1-10) and start by themselves when a place is free. Use the arrows on a waiting download to change the order.</div>
+      </div>
+      <div class="field check">
+        <input id="setNotify" type="checkbox"><label for="setNotify" style="margin:0">Show Windows notifications</label>
+      </div>
+      <div class="field check">
+        <input id="setAsk" type="checkbox"><label for="setAsk" style="margin:0">Ask before starting captured downloads</label>
+      </div>
+      <div class="hint" style="margin:-10px 0 16px">Shows the "Download File Info" window for downloads sent by the browser extension.</div>
+      <div class="field check">
+        <input id="setResume" type="checkbox"><label for="setResume" style="margin:0">Continue unfinished downloads when BDDM starts</label>
+      </div>
+      <div class="hint" style="margin:-10px 0 16px">Downloads that were running when BDDM closed, or when the computer crashed or lost power, continue where they stopped.</div>
+      <div class="field check">
+        <input id="setAutostart" type="checkbox"><label for="setAutostart" style="margin:0">Start BDDM with Windows</label>
+      </div>
+      <div class="hint" style="margin:-10px 0 16px">BDDM starts in the background when you sign in to Windows, so the browser extension always finds it.</div>
+      <button id="saveSettings" class="primary">Save settings</button>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <div class="field" style="margin-bottom:8px">
+        <label>Folders by file type</label>
+        <div class="hint">Each type of file can go to its own folder. Leave a folder empty to use the main download folder. When you choose another folder in the "Download File Info" window, BDDM remembers it for that file type.</div>
+      </div>
+      <div id="cats"></div>
+      <button id="saveCats" class="primary" style="margin-top:8px">Save folders</button>
+    </div>
+    <div class="hint" id="appVersion" style="margin-top:12px;text-align:center"></div>
+    <div class="card" style="margin-top:16px">
+      <div class="field" style="margin-bottom:8px">
+        <label>Video tools</label>
+        <div class="hint">yt-dlp, ffmpeg and deno download videos from YouTube, Facebook, Instagram, TikTok and many other sites. yt-dlp updates itself once a day.</div>
+      </div>
+      <div class="field">
+        <label for="setCookies">Use cookies from</label>
+        <select id="setCookies">
+          <option value="">Off (default)</option>
+          <option value="firefox">Firefox</option>
+          <option value="chrome">Chrome</option>
+          <option value="edge">Edge</option>
+          <option value="brave">Brave</option>
+        </select>
+        <div class="hint">Only needed when YouTube says "confirm you are not a bot", or for private and members-only videos. Firefox works best; Chrome, Edge and Brave must be fully closed while BDDM reads their cookies.</div>
+      </div>
+      <div id="toolsList" class="hint" style="font-size:13px;color:var(--text)"></div>
+      <div id="toolsProgress" class="hint"></div>
+      <button id="toolsInstall" style="margin-top:10px">Download missing tools</button>
+    </div>
+  </section>
+</main>
+
+<div id="dlgConfirm" class="overlay">
+  <div class="dialog">
+    <h3 id="cTitle"></h3>
+    <p id="cText"></p>
+    <label id="cCheckWrap" class="check" hidden><input id="cCheck" type="checkbox"> <span id="cCheckText"></span></label>
+    <div class="btns">
+      <button id="cNo">Cancel</button>
+      <button id="cYes" class="primary">OK</button>
+    </div>
+  </div>
+</div>
+
+<div id="dlgStopped" class="overlay">
+  <div class="dialog">
+    <h3>BDDM has stopped</h3>
+    <p>Your unfinished downloads are saved and will be paused the next time you open BDDM. You can close this window now.</p>
+  </div>
+</div>
+
+<div id="toasts"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let currentTab = "downloads";
+let stopped = false;
+const rows = {};          // id -> row element
+
+// ---------- helpers ----------
+function fmtSize(n, zero) {
+  if (!n || n <= 0) return zero ? "0 B" : "?";
+  const u = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return n.toFixed(i === 0 ? 0 : 1) + " " + u[i];
+}
+function fmtSpeed(b) { return b > 0 ? fmtSize(b) + "/s" : "-"; }
+function fmtETA(s) {
+  if (s < 0) return "-";
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  if (h) return h + "h " + m + "m";
+  if (m) return m + "m " + sec + "s";
+  return sec + "s";
+}
+function fmtTime(t) {
+  if (!t || t.startsWith("0001")) return "-";
+  const d = new Date(t);
+  return d.toLocaleDateString() + " " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+async function api(path, body) {
+  const opt = body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
+  const r = await fetch(path, opt);
+  let data = {};
+  try { data = await r.json(); } catch (e) {}
+  if (!r.ok && r.status !== 409) throw new Error(data.error || ("HTTP " + r.status));
+  data._status = r.status;
+  return data;
+}
+function toast(title, text, kind) {
+  // The same message again while it is still shown: count it, do not stack it.
+  for (const old of $("toasts").children) {
+    if (old._key === title + "\n" + (text || "")) {
+      old._n++;
+      old._times.textContent = "\u00D7" + old._n;
+      clearTimeout(old._timer);
+      old._timer = setTimeout(() => old.remove(), 5000);
+      return;
+    }
+  }
+  const t = el("div", "toast " + (kind || ""));
+  const b = el("b", "", title);
+  t._times = el("span", "times", "");
+  b.append(t._times);
+  t.append(b, el("span", "", text || ""));
+  t._key = title + "\n" + (text || "");
+  t._n = 1;
+  $("toasts").append(t);
+  while ($("toasts").children.length > 4) $("toasts").firstChild.remove();
+  t._timer = setTimeout(() => t.remove(), 5000);
+}
+function confirmBox(title, text, okText, checkText) {
+  return new Promise((resolve) => {
+    $("cTitle").textContent = title;
+    $("cText").textContent = text;
+    $("cYes").textContent = okText || "OK";
+    $("cCheckWrap").hidden = !checkText;
+    $("cCheck").checked = false;
+    $("cCheckText").textContent = checkText || "";
+    $("dlgConfirm").classList.add("show");
+    const done = (ok) => {
+      $("dlgConfirm").classList.remove("show");
+      $("cYes").onclick = $("cNo").onclick = null;
+      resolve({ ok, checked: $("cCheck").checked });
+    };
+    $("cYes").onclick = () => done(true);
+    $("cNo").onclick = () => done(false);
+    $("cYes").focus();
+  });
+}
+
+// ---------- tabs ----------
+document.querySelectorAll("nav button").forEach((b) => {
+  b.onclick = () => {
+    currentTab = b.dataset.tab;
+    document.querySelectorAll("nav button").forEach((x) => x.classList.toggle("active", x === b));
+    for (const t of ["downloads", "settings"]) $("tab-" + t).hidden = t !== currentTab;
+    if (currentTab === "settings") loadSettings();
+  };
+});
+
+// ---------- add ----------
+async function addURL(url, force) {
+  url = (url || "").trim();
+  if (!url) { $("url").focus(); return; }
+  try {
+    const body = { url, force: !!force };
+    if (!$("moreBox").hidden) {
+      const mirrors = $("mirrors").value.split(/\s+/).filter(Boolean);
+      if (mirrors.length) body.mirrors = mirrors;
+      if ($("hash").value.trim()) body.hash = $("hash").value.trim();
+    }
+    const r = await api("/api/add", body);
+    if (r._status === 409 && r.duplicate) {
+      const a = await confirmBox("Already downloaded", "You already downloaded this file (" + r.name + "). Download again?", "Download again");
+      if (a.ok) return addURL(url, true);
+      return;
+    }
+    $("url").value = "";
+    $("mirrors").value = ""; $("hash").value = "";
+    if (r.video) { toast("Video link", "Choose the quality in the video window."); return; }
+    if (r.message) { toast("Google Drive", r.message); return; }
+    toast("Added", r.job.name);
+    refresh();
+  } catch (e) {
+    toast("Could not add the link", e.message, "bad");
+  }
+}
+$("addBtn").onclick = () => addURL($("url").value);
+$("moreBtn").onclick = () => { $("moreBox").hidden = !$("moreBox").hidden; };
+$("url").addEventListener("keydown", (e) => { if (e.key === "Enter") addURL($("url").value); });
+
+// ---------- download list ----------
+function makeRow(j) {
+  const r = el("div", "item");
+  r._jobId = j.id;
+  const row1 = el("div", "row1");
+  r._name = el("div", "name");
+  r._badge = el("span", "badge");
+  row1.append(r._name, r._badge);
+  r._bar = el("div", "bar");
+  r._fill = el("div");
+  r._bar.append(r._fill);
+  const row2 = el("div", "row2");
+  const stats = el("div", "stats");
+  r._size = el("span"); r._speed = el("span"); r._eta = el("span");
+  stats.append(r._size, r._speed, r._eta);
+  const actions = el("div", "actions");
+  r._pause = el("button", "small", "Pause");
+  r._resume = el("button", "small", "Resume");
+  r._open = el("button", "small", "Open folder");
+  r._del = el("button", "small danger", "Delete");
+  r._first = el("button", "small", "Start next");
+  r._first.title = "Move to the front of the queue";
+  r._up = el("button", "small", "\u2191");
+  r._up.title = "Move up in the queue";
+  r._down = el("button", "small", "\u2193");
+  r._down.title = "Move down in the queue";
+  actions.append(r._first, r._up, r._down, r._pause, r._resume, r._open, r._del);
+  row2.append(stats, actions);
+  r._msg = el("div", "msg");
+  r.append(row1, r._bar, row2, r._msg);
+  const move = (where) => api("/api/jobs/" + j.id + "/move", { where }).then(refresh).catch((e) => toast("Error", e.message, "bad"));
+  r._first.onclick = () => move("first");
+  r._up.onclick = () => move("up");
+  r._down.onclick = () => move("down");
+
+  r._pause.onclick = () => api("/api/jobs/" + j.id + "/pause", {}).then(refresh).catch((e) => toast("Error", e.message, "bad"));
+  r._resume.onclick = () => api("/api/jobs/" + j.id + "/resume", {}).then(refresh).catch((e) => toast("Error", e.message, "bad"));
+  r._open.onclick = () => api("/api/jobs/" + j.id + "/open", {}).catch((e) => toast("Could not open folder", e.message, "bad"));
+  r._del.onclick = async () => {
+    const a = await confirmBox("Delete download", "Remove \"" + r._name.textContent + "\" from the list?", "Delete", "Also delete the file from disk");
+    if (!a.ok) return;
+    try { await api("/api/jobs/" + j.id + "/delete", { deleteFile: a.checked }); refresh(); }
+    catch (e) { toast("Error", e.message, "bad"); }
+  };
+  return r;
+}
+
+function updateRow(r, j) {
+  r._name.textContent = (j.kind === "video" ? "\u25B6 " : "") + j.name;
+  r._name.title = j.url;
+  const label = j.viewOnly ? "View only" : j.status;
+  r._badge.textContent = label;
+  r._badge.className = "badge " + (j.viewOnly ? "ViewOnly" : j.status);
+  const known = j.size > 0;
+  const pct = known ? Math.min(100, (j.done * 100) / j.size) : (j.status === "Done" ? 100 : 0);
+  r._bar.className = "bar " + j.status + (!known && j.status === "Downloading" ? " unknown" : "");
+  r._fill.style.width = pct.toFixed(1) + "%";
+  r._size.textContent = known ? fmtSize(j.done, true) + " / " + fmtSize(j.size) + "  (" + pct.toFixed(1) + "%)" : fmtSize(j.done, true) + " downloaded";
+  const active = j.status === "Downloading";
+  r._speed.textContent = active ? "Speed: " + (j.speed > 0 ? fmtSpeed(j.speed) : "connecting...") : "";
+  r._eta.textContent = active ? "ETA: " + fmtETA(j.eta) : (j.status === "Done" ? "Finished " + fmtTime(j.finished) : "");
+  r._pause.hidden = !(j.status === "Downloading" || j.status === "Queued");
+  r._resume.hidden = !(j.status === "Paused" || (j.status === "Error" && !j.viewOnly));
+  r._resume.textContent = j.status === "Error" ? "Retry" : "Resume";
+  const queued = j.status === "Queued";
+  r._first.hidden = !queued || j.queuePos <= 1;
+  r._up.hidden = !queued || j.queuePos <= 1;
+  r._down.hidden = !queued || j.queuePos >= j.queueLen;
+  if (j.status === "Error") {
+    r._msg.className = j.viewOnly ? "msg" : "msg err";
+    r._msg.textContent = (j.reason || j.error || "Failed") + (j.viewOnly ? " Open it in Firefox and use Save as PDF from the BDDM extension." : "");
+    if (j.fix && !j.viewOnly) r._msg.append(el("span", "fix", "What to do: " + j.fix));
+    if (j.error && j.reason && j.reason !== j.error) {
+      const d = el("span", "details", "Details: " + j.error);
+      r._msg.append(d);
+    }
+  }
+  else if (queued) { r._msg.className = "msg"; r._msg.textContent = j.queuePos ? "Waiting in the queue (" + j.queuePos + " of " + j.queueLen + "); starts by itself when a place is free" : "Queued"; }
+  else if (j.status === "Done" && j.checked) { r._msg.className = "msg ok"; r._msg.textContent = "\u2713 " + j.checked; }
+  else if (active && j.netWait) { r._msg.className = "msg net"; r._msg.textContent = j.message || "No internet connection. BDDM continues automatically when the connection is back..."; }
+  else { r._msg.className = "msg"; r._msg.textContent = active ? (j.message || "") : ""; }
+}
+
+// ---------- folder downloads (groups) ----------
+const groupRows = {};     // group id -> row element
+const openGroups = new Set(JSON.parse(localStorage.getItem("bddmOpenGroups") || "[]"));
+function saveOpenGroups() { localStorage.setItem("bddmOpenGroups", JSON.stringify([...openGroups])); }
+
+function makeGroupRow(g) {
+  const r = el("div", "item group");
+  const row1 = el("div", "row1");
+  r._toggle = el("button", "toggle", "\u25B8");
+  r._toggle.title = "Show the files";
+  r._name = el("div", "name");
+  r._icon = el("span", "ficon");
+  r._title = el("span");
+  r._name.append(r._icon, r._title);
+  r._count = el("span", "count");
+  r._badge = el("span", "badge");
+  row1.append(r._toggle, r._name, r._count, r._badge);
+  r._bar = el("div", "bar");
+  r._fill = el("div");
+  r._bar.append(r._fill);
+  const row2 = el("div", "row2");
+  const stats = el("div", "stats");
+  r._size = el("span"); r._speed = el("span"); r._eta = el("span");
+  stats.append(r._size, r._speed, r._eta);
+  const actions = el("div", "actions");
+  r._pause = el("button", "small", "Pause");
+  r._resume = el("button", "small", "Resume");
+  r._retry = el("button", "small", "Retry failed");
+  r._open = el("button", "small", "Open folder");
+  r._del = el("button", "small danger", "Delete");
+  actions.append(r._pause, r._resume, r._retry, r._open, r._del);
+  row2.append(stats, actions);
+  r._msg = el("div", "msg");
+  r._kids = el("div", "children");
+  r.append(row1, r._bar, row2, r._msg, r._kids);
+
+  const act = (what, body) => api("/api/groups/" + g.id + "/" + what, body || {}).then(refresh).catch((e) => toast("Error", e.message, "bad"));
+  const flip = () => {
+    if (openGroups.has(g.id)) openGroups.delete(g.id); else openGroups.add(g.id);
+    saveOpenGroups();
+    refresh();
+  };
+  r._toggle.onclick = flip;
+  r._name.onclick = flip;
+  r._pause.onclick = () => act("pause");
+  r._resume.onclick = () => act("resume");
+  r._retry.onclick = () => act("retry");
+  r._open.onclick = () => api("/api/groups/" + g.id + "/open", {}).catch((e) => toast("Could not open folder", e.message, "bad"));
+  r._del.onclick = async () => {
+    const a = await confirmBox("Delete folder download", "Remove the folder \"" + r._title.textContent + "\" and its " + r._total + " files from the list?", "Delete", "Also delete the downloaded files from disk");
+    if (!a.ok) return;
+    act("delete", { deleteFile: a.checked });
+  };
+  return r;
+}
+
+function updateGroupRow(r, g, kids) {
+  const open = openGroups.has(g.id);
+  r._total = g.total;
+  r._toggle.textContent = open ? "\u25BE" : "\u25B8";
+  r._toggle.title = open ? "Hide the files" : "Show the files";
+  r._title.textContent = g.name;
+  r._name.title = g.url;
+  r._count.textContent = g.finishedFiles + " of " + g.total + " files done" + (g.failed ? ", " + g.failed + " failed" : "") + (g.viewOnly ? ", " + g.viewOnly + " view-only" : "");
+  r._badge.textContent = g.status;
+  r._badge.className = "badge " + g.status;
+  const known = g.size > 0;
+  const pct = known ? Math.min(100, (g.done * 100) / g.size) : (g.total ? (g.finishedFiles * 100) / g.total : 0);
+  r._bar.className = "bar " + g.status;
+  r._fill.style.width = pct.toFixed(1) + "%";
+  r._size.textContent = known ? fmtSize(g.done, true) + " / " + fmtSize(g.size) + "  (" + pct.toFixed(1) + "%)" : fmtSize(g.done, true) + " downloaded";
+  const active = g.status === "Downloading";
+  r._speed.textContent = active ? "Speed: " + (g.speed > 0 ? fmtSpeed(g.speed) : "connecting...") : "";
+  r._eta.textContent = active ? "ETA: " + fmtETA(g.eta) : (g.status === "Done" && g.ended ? "Finished " + fmtTime(g.ended) : "");
+  r._pause.hidden = !(g.active > 0 || g.queued > 0);
+  r._resume.hidden = !(g.paused > 0);
+  r._retry.hidden = !(g.failed > 0);
+  if (!g.failed && g.viewOnly && !active && !g.queued) { r._msg.className = "msg"; r._msg.textContent = g.viewOnly + " " + (g.viewOnly === 1 ? "file is" : "files are") + " view only: the owner turned off downloading, so they can't be downloaded. Open each one in Firefox and use Save as PDF from the BDDM extension."; }
+  else if (g.failed && !active && !g.queued) { r._msg.className = "msg err"; r._msg.textContent = g.failed + " " + (g.failed === 1 ? "file" : "files") + " failed. Open the list to see why, or press Retry failed."; }
+  else if (g.queued && !g.active) { r._msg.className = "msg"; r._msg.textContent = "Waiting for other downloads to finish..."; }
+  else { r._msg.className = "msg"; r._msg.textContent = active ? g.active + " downloading, " + g.queued + " waiting" : ""; }
+  r._kids.hidden = !open;
+  if (open) placeTree(r._kids, g, kids);
+}
+
+// ---- the files of a folder download, as a tree of subfolders ----
+const subHeads = {};      // "group|path" -> subfolder header element
+const openSubs = new Set(JSON.parse(localStorage.getItem("bddmClosedSubs") || "[]")); // closed ones
+function relDir(base, dir) {
+  const norm = (p) => (p || "").replace(/\\/g, "/").replace(/\/+$/, "");
+  const b = norm(base), d = norm(dir);
+  if (d === b) return "";
+  if (d.toLowerCase().startsWith(b.toLowerCase() + "/")) return d.slice(b.length + 1);
+  return "";
+}
+function makeSubHead(key, name) {
+  const h = el("div", "subhead");
+  h._arrow = el("span", "arrow");
+  h._label = el("span", "", "\uD83D\uDCC1 " + name);
+  h._count = el("span", "count");
+  h.append(h._arrow, h._label, h._count);
+  h.onclick = () => {
+    if (openSubs.has(key)) openSubs.delete(key); else openSubs.add(key);
+    localStorage.setItem("bddmClosedSubs", JSON.stringify([...openSubs]));
+    refresh();
+  };
+  return h;
+}
+// placeTree shows every file of the group under its subfolder (like on disk):
+// subfolders first (A-Z), then the files (A-Z).
+function placeTree(box, g, kids) {
+  const root = { dirs: {}, files: [] };
+  for (const j of kids) {
+    const rel = relDir(g.dir, j.dir);
+    let node = root;
+    if (rel) for (const part of rel.split("/")) node = node.dirs[part] = node.dirs[part] || { dirs: {}, files: [] };
+    node.files.push(j);
+  }
+  const order = []; // elements in display order
+  const walk = (node, path, depth) => {
+    for (const name of Object.keys(node.dirs).sort((a, b) => a.localeCompare(b))) {
+      const sub = node.dirs[name];
+      const p = path ? path + "/" + name : name;
+      const key = g.id + "|" + p;
+      const h = subHeads[key] || (subHeads[key] = makeSubHead(key, name));
+      const all = [];
+      const collect = (n) => { all.push(...n.files); Object.values(n.dirs).forEach(collect); };
+      collect(sub);
+      const done = all.filter((x) => x.status === "Done").length;
+      const closed = openSubs.has(key);
+      h._arrow.textContent = closed ? "\u25B8" : "\u25BE";
+      h._count.textContent = done + " of " + all.length + " done";
+      h.style.marginLeft = (depth * 18) + "px";
+      order.push(h);
+      if (!closed) walk(sub, p, depth + 1);
+    }
+    for (const j of node.files.slice().sort((a, b) => a.name.localeCompare(b.name))) {
+      const r = rows[j.id] || (rows[j.id] = makeRow(j));
+      updateRow(r, j);
+      r.style.marginLeft = (depth * 18) + "px";
+      order.push(r);
+    }
+  };
+  walk(root, "", 0);
+  order.forEach((e, i) => { if (box.children[i] !== e) box.insertBefore(e, box.children[i] || null); });
+  while (box.children.length > order.length) box.lastChild.remove();
+  box._shown = new Set(order.filter((e) => e._jobId).map((e) => e._jobId));
+}
+
+// placeRows puts job rows into a container in order.
+function placeRows(box, jobs) {
+  jobs.forEach((j, i) => {
+    let r = rows[j.id];
+    if (!r) { r = rows[j.id] = makeRow(j); }
+    updateRow(r, j);
+    if (box.children[i] !== r) box.insertBefore(r, box.children[i] || null);
+  });
+}
+
+function renderList(jobs, groups) {
+  const list = $("list");
+  const seen = new Set();
+  const byGroup = {};
+  const gIds = new Set((groups || []).map((g) => g.id));
+  const top = []; // {t, kind, v}
+  for (const j of jobs) {
+    if (j.group && gIds.has(j.group)) { (byGroup[j.group] = byGroup[j.group] || []).push(j); continue; }
+    top.push({ t: j.started, kind: "job", v: j });
+  }
+  for (const g of groups || []) top.push({ t: g.started, kind: "group", v: g });
+  top.sort((a, b) => (a.t < b.t ? 1 : a.t > b.t ? -1 : 0));
+  top.forEach((e, i) => {
+    let r;
+    if (e.kind === "group") {
+      const g = e.v;
+      r = groupRows[g.id] || (groupRows[g.id] = makeGroupRow(g));
+      const kids = (byGroup[g.id] || []).slice().sort((a, b) => a.name.localeCompare(b.name));
+      updateGroupRow(r, g, kids);
+      seen.add("g:" + g.id);
+      if (openGroups.has(g.id) && r._kids._shown) for (const id of r._kids._shown) seen.add(id);
+    } else {
+      const j = e.v;
+      r = rows[j.id] || (rows[j.id] = makeRow(j));
+      updateRow(r, j);
+      seen.add(j.id);
+    }
+    if (list.children[i] !== r) list.insertBefore(r, list.children[i] || null);
+  });
+  for (const id in rows) if (!seen.has(id)) { rows[id].remove(); delete rows[id]; }
+  for (const id in groupRows) if (!seen.has("g:" + id)) { groupRows[id].remove(); delete groupRows[id]; }
+  while (list.children.length > top.length) list.lastChild.remove();
+  $("emptyList").hidden = top.length > 0;
+}
+
+// Announcements ("Download complete", "Folder download complete" ...) come
+// from BDDM itself, once each. With several BDDM windows open, only one of
+// them shows each message.
+let evCursor = -1;
+let evBoot = "";
+async function handleEvents(r) {
+  if (r.eventBoot !== evBoot) { evBoot = r.eventBoot; evCursor = -1; }
+  if (evCursor < 0) { evCursor = r.eventSeq || 0; return; }
+  const evs = (r.events || []).filter((e) => e.seq > evCursor);
+  evCursor = Math.max(evCursor, r.eventSeq || 0);
+  if (!evs.length) return;
+  const key = "bddmShown:" + evBoot;
+  const show = () => {
+    const shown = parseInt(localStorage.getItem(key) || "0", 10);
+    let top = shown;
+    for (const e of evs) {
+      if (e.seq <= shown) continue;
+      toast(e.title, e.body, e.kind);
+      top = Math.max(top, e.seq);
+    }
+    localStorage.setItem(key, String(top));
+  };
+  try {
+    if (navigator.locks && navigator.locks.request) await navigator.locks.request("bddm-toasts", show);
+    else show();
+  } catch (e) { show(); }
+}
+
+let busy = false;
+async function refresh() {
+  if (stopped || busy) return;
+  busy = true;
+  try {
+    const r = await api("/api/list?events=" + evCursor);
+    $("offline").classList.remove("show");
+    await handleEvents(r);
+    renderList(r.jobs, r.groups);
+  } catch (e) {
+    $("offline").classList.add("show");
+  } finally { busy = false; }
+}
+setInterval(refresh, 500);
+refresh();
+
+// ---------- video tools ----------
+let toolsTimer = null;
+async function loadTools() {
+  clearTimeout(toolsTimer);
+  let t;
+  try { t = await api("/api/tools"); } catch (e) { return; }
+  const names = { "yt-dlp": "yt-dlp", ffmpeg: "ffmpeg", ffprobe: "ffprobe", deno: "deno (for YouTube)" };
+  $("toolsList").innerHTML = "";
+  for (const k of Object.keys(names)) {
+    const d = el("div", "", (t.tools[k] ? "\u2714 " : "\u2716 ") + names[k] + (t.tools[k] ? "" : " - missing"));
+    d.style.color = t.tools[k] ? "#86efac" : "#fca5a5";
+    if (t.paths[k]) d.title = t.paths[k];
+    $("toolsList").append(d);
+  }
+  $("toolsProgress").textContent = (t.progress || []).map((x) => x.name + ": " + (x.state === "downloading" ? Math.round(x.done * 100 / Math.max(1, x.total)) + "%" : x.state)).join("   ") + (t.error ? "  " + t.error : "") + (t.update ? "  Last update: " + t.update : "");
+  $("toolsInstall").hidden = t.missing.length === 0 && !t.installing;
+  $("toolsInstall").disabled = t.installing || !t.canInstall;
+  $("toolsInstall").textContent = t.installing ? "Downloading..." : "Download missing tools (about " + t.downloadMB + " MB)";
+  if (t.installing && currentTab === "settings") toolsTimer = setTimeout(loadTools, 800);
+}
+$("toolsInstall").onclick = async () => {
+  try { await api("/api/tools/install", {}); } catch (e) { toast("Video tools", e.message, "bad"); }
+  loadTools();
+};
+
+// ---------- settings ----------
+async function loadSettings() {
+  loadTools();
+  const s = await api("/api/settings");
+  $("setDir").value = s.downloadDir;
+  $("setParts").value = s.parts;
+  $("setActive").value = s.maxActive;
+  $("setNotify").checked = s.notifications;
+  $("setAsk").checked = s.askCaptured;
+  $("setCookies").value = s.cookiesBrowser || "";
+  $("setAutostart").checked = !!s.startWithWindows;
+  $("setResume").checked = !!s.resumeOnStart;
+  renderCats(s.categories || [], s.downloadDir);
+  api("/api/ping").then((p) => { $("appVersion").textContent = "BDDM version " + (p.version || ""); }).catch(() => {});
+}
+
+// ---------- folders by file type ----------
+function renderCats(cats, mainDir) {
+  const box = $("cats");
+  box.textContent = "";
+  for (const c of cats) {
+    const row = document.createElement("div");
+    row.className = "catrow";
+    row.dataset.name = c.name;
+    const name = document.createElement("div");
+    name.className = "catname";
+    name.textContent = c.name;
+    const dir = document.createElement("input");
+    dir.type = "text"; dir.spellcheck = false; dir.className = "catdir";
+    dir.value = c.dir || ""; dir.placeholder = mainDir + " (main folder)";
+    const browse = document.createElement("button");
+    browse.textContent = "Browse...";
+    browse.onclick = async () => {
+      try {
+        const r = await api("/api/pickfolder", { start: dir.value || mainDir });
+        if (r.dir) dir.value = r.dir;
+      } catch (e) { toast("Folder picker", e.message, "bad"); }
+    };
+    const line = document.createElement("div");
+    line.className = "line";
+    line.append(dir, browse);
+    const exts = document.createElement("input");
+    exts.type = "text"; exts.spellcheck = false; exts.className = "catexts";
+    exts.value = c.exts || "";
+    exts.placeholder = c.name === "Other" ? "Everything else" : "Extensions, separated by spaces";
+    exts.disabled = c.name === "Other";
+    exts.title = "File extensions of this type";
+    row.append(name, line, exts);
+    box.append(row);
+  }
+}
+$("saveCats").onclick = async () => {
+  const cats = [...document.querySelectorAll("#cats .catrow")].map((r) => ({
+    name: r.dataset.name, dir: r.querySelector(".catdir").value.trim(), exts: r.querySelector(".catexts").value,
+  }));
+  try {
+    const s = await api("/api/settings", { categories: cats });
+    renderCats(s.categories || [], s.downloadDir);
+    toast("Folders saved", "New downloads go to the folder of their file type.", "ok");
+  } catch (e) { toast("Could not save the folders", e.message, "bad"); }
+};
+$("browseDir").onclick = async () => {
+  try {
+    const r = await api("/api/pickfolder", {});
+    if (r.dir) $("setDir").value = r.dir;
+  } catch (e) { toast("Folder picker", e.message, "bad"); }
+};
+$("saveSettings").onclick = async () => {
+  try {
+    const s = await api("/api/settings", {
+      downloadDir: $("setDir").value, parts: parseInt($("setParts").value, 10) || 8,
+      maxActive: parseInt($("setActive").value, 10) || 3, notifications: $("setNotify").checked,
+      askCaptured: $("setAsk").checked, cookiesBrowser: $("setCookies").value,
+      startWithWindows: $("setAutostart").checked, resumeOnStart: $("setResume").checked,
+    });
+    $("setDir").value = s.downloadDir; $("setParts").value = s.parts; $("setActive").value = s.maxActive;
+    toast("Settings saved", "New downloads will use these settings.", "ok");
+  } catch (e) { toast("Could not save settings", e.message, "bad"); }
+};
+$("setCookies").onchange = async () => {
+  try {
+    await api("/api/settings", { cookiesBrowser: $("setCookies").value });
+    toast("Settings saved", $("setCookies").value ? "Video downloads will use your browser's cookies." : "Browser cookies are off.", "ok");
+  } catch (e) { toast("Could not save settings", e.message, "bad"); }
+};
+$("openDir").onclick = () => api("/api/openfolder", {}).catch((e) => toast("Could not open folder", e.message, "bad"));
+
+// ---------- quit ----------
+$("quitBtn").onclick = async () => {
+  const a = await confirmBox("Quit BDDM", "Running downloads will be paused and saved. You can resume them next time.", "Quit");
+  if (!a.ok) return;
+  try { await api("/api/quit", {}); } catch (e) {}
+  stopped = true;
+  $("dlgStopped").classList.add("show");
+  setTimeout(() => window.close(), 1500);
+};
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && $("dlgConfirm").classList.contains("show")) $("cNo").click();
+});
+$("url").focus();
+</script>
+</body>
+</html>

@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Download File Info</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%233b82f6'/%3E%3Cpath d='M32 14v26m-11-11 11 11 11-11M18 48h28' stroke='white' stroke-width='6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<style>
+  .more { margin: 4px 0 8px; font-size: 13px; }
+  .more summary { cursor: pointer; opacity: .8; margin-bottom: 8px; }
+  .more textarea { width: 100%; box-sizing: border-box; font: 12px/1.4 Consolas, monospace; resize: vertical; }
+  .catnote { font-weight: normal; opacity: .7; }
+  :root {
+    --bg: #14161b; --panel: #1c1f26; --panel2: #232733; --line: #2e3340;
+    --text: #e6e8ee; --muted: #8b93a7; --accent: #3b82f6; --accent2: #2563eb;
+    --ok: #22c55e; --warn: #f59e0b; --bad: #ef4444;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { background: var(--bg); color: var(--text); font: 14px/1.4 "Segoe UI", system-ui, -apple-system, sans-serif; display: flex; flex-direction: column; }
+  header { display: flex; align-items: center; gap: 10px; padding: 12px 18px; background: var(--panel); border-bottom: 1px solid var(--line); font-weight: 700; font-size: 16px; }
+  header svg { width: 24px; height: 24px; flex: none; }
+  main { flex: 1; padding: 16px 18px 8px; overflow: auto; }
+  .field { margin-bottom: 13px; }
+  .field label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; margin-bottom: 5px; }
+  .line { display: flex; gap: 8px; }
+  input[type=text] { flex: 1; width: 100%; font: inherit; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 11px; outline: none; }
+  input:focus, select:focus { border-color: var(--accent); }
+  select { font: inherit; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 11px; outline: none; min-width: 200px; }
+  .value { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .value.muted { color: var(--muted); }
+  .row2 { display: flex; gap: 10px; }
+  .row2 .field { flex: 1; min-width: 0; }
+  .row2 .field.size { flex: 0 0 140px; }
+  button { font: inherit; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; cursor: pointer; white-space: nowrap; }
+  button:hover { border-color: #49506a; background: #2a2f3d; }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button.primary:hover { background: var(--accent2); }
+  .warn { display: none; gap: 10px; align-items: flex-start; background: #2b1a05; border: 1px solid #78350f; color: #fcd34d; border-radius: 10px; padding: 10px 12px; margin-bottom: 13px; font-size: 13px; }
+  .warn.show { display: flex; }
+  .warn b { color: #fde68a; word-break: break-all; }
+  .err { color: #fca5a5; font-size: 13px; min-height: 18px; }
+  footer { display: flex; gap: 8px; align-items: center; padding: 12px 18px; background: var(--panel); border-top: 1px solid var(--line); }
+  footer .spacer { flex: 1; }
+  .dim { color: var(--muted); font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <svg viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#3b82f6"/><path d="M32 14v26m-11-11 11 11 11-11M18 48h28" stroke="white" stroke-width="6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  Download File Info
+</header>
+<main>
+  <div class="warn" id="dup">
+    <span>&#9888;</span>
+    <span>You already downloaded this file<span id="dupName"></span>. Download it again? It will be saved with a new name.</span>
+  </div>
+  <div class="field" id="fmtField" hidden>
+    <label for="fmt">Save as</label>
+    <select id="fmt"></select>
+  </div>
+  <div class="field">
+    <label for="name">File name</label>
+    <input id="name" type="text" spellcheck="false" autocomplete="off">
+  </div>
+  <div class="row2">
+    <div class="field size">
+      <label>Size</label>
+      <div class="value" id="size">Checking...</div>
+    </div>
+    <div class="field">
+      <label>Link</label>
+      <div class="value muted" id="url">-</div>
+    </div>
+  </div>
+  <div class="field">
+    <label for="dir">Save to <span id="cat" class="catnote"></span></label>
+    <div class="line">
+      <input id="dir" type="text" spellcheck="false" autocomplete="off">
+      <button id="browse">Change...</button>
+    </div>
+  </div>
+  <details id="more" class="more">
+    <summary>More options: checksum, mirror links</summary>
+    <div class="field">
+      <label for="hash">Checksum (optional)</label>
+      <input id="hash" type="text" spellcheck="false" autocomplete="off" placeholder="MD5, SHA-1, SHA-256 or SHA-512 from the website">
+    </div>
+    <div class="field">
+      <label for="mirrors">Mirror links (optional, one per line)</label>
+      <textarea id="mirrors" rows="2" spellcheck="false" placeholder="Other links to the same file"></textarea>
+    </div>
+  </details>
+  <div class="err" id="err"></div>
+</main>
+<footer>
+  <button id="later" title="Add it to the list paused; press Resume when you want it">Download Later</button>
+  <span class="spacer"></span>
+  <button id="cancel">Cancel</button>
+  <button id="start" class="primary">Start Download</button>
+</footer>
+<script>
+const $ = (id) => document.getElementById(id);
+const id = new URLSearchParams(location.search).get("id") || "";
+const FMT_NAMES = { pdf: "PDF document (.pdf)", docx: "Word document (.docx)", txt: "Plain text (.txt)", xlsx: "Excel workbook (.xlsx)", csv: "CSV, first sheet (.csv)", pptx: "PowerPoint (.pptx)" };
+let answered = false, nameTouched = false, dirTouched = false, timer = null;
+
+async function api(path, body) {
+  const opt = body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
+  const r = await fetch(path, opt);
+  let data = {};
+  try { data = await r.json(); } catch (e) {}
+  if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
+  return data;
+}
+function fmtBytes(n) {
+  if (!n || n <= 0) return "Unknown";
+  const u = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return (i === 0 ? n : n.toFixed(n >= 100 ? 0 : n >= 10 ? 1 : 2)) + " " + u[i];
+}
+function shortUrl(u) {
+  try {
+    const x = new URL(u);
+    let p = decodeURIComponent(x.pathname);
+    if (p.length > 34) p = p.slice(0, 14) + "..." + p.slice(-17);
+    return x.host + p;
+  } catch (e) { return u; }
+}
+function gone(msg) {
+  answered = true;
+  $("err").textContent = msg;
+  for (const b of ["start", "later", "browse"]) $(b).disabled = true;
+  $("cancel").textContent = "Close";
+}
+async function load() {
+  let v;
+  try { v = await api("/api/pending/" + encodeURIComponent(id)); }
+  catch (e) { gone(e.message); return; }
+  if (v.formats && v.formats.length && !$("fmt").options.length) {
+    for (const f of v.formats) {
+      const o = document.createElement("option");
+      o.value = f; o.textContent = FMT_NAMES[f] || f.toUpperCase();
+      $("fmt").append(o);
+    }
+    $("fmt").value = v.format || v.formats[0];
+    $("fmtField").hidden = false;
+    document.title = "Download Google file";
+  }
+  if (!nameTouched) $("name").value = v.name || "";
+  if (!dirTouched) $("dir").value = v.dir || "";
+  $("cat").textContent = v.category ? "(" + v.category + " folder)" : "";
+  $("url").textContent = shortUrl(v.url);
+  $("url").title = v.url;
+  $("size").textContent = v.checking ? "Checking..." : fmtBytes(v.size);
+  $("size").title = v.size > 0 ? v.size.toLocaleString() + " bytes" : "";
+  if (v.duplicate) {
+    $("dup").classList.add("show");
+    $("dupName").innerHTML = "";
+    if (v.dupName) { $("dupName").append(" ("); const b = document.createElement("b"); b.textContent = v.dupName; $("dupName").append(b, ")"); }
+    $("start").textContent = "Download again";
+  }
+  if (!v.checking && v.problem && v.final) {
+    $("err").textContent = v.problem;
+    $("start").disabled = true;
+    $("later").disabled = true;
+  } else {
+    $("err").textContent = !v.checking && v.problem ? "Note: the server did not answer the size check (" + v.problem + "). You can still try." : "";
+  }
+  if (v.formats && v.formats.length && !v.checking) $("size").textContent = "Not known yet";
+  if (v.checking) timer = setTimeout(load, 700);
+}
+async function start(later) {
+  $("err").textContent = "";
+  for (const b of ["start", "later", "cancel"]) $(b).disabled = true;
+  try {
+    await api("/api/pending/" + encodeURIComponent(id) + "/start", { name: $("name").value, dir: dirTouched ? $("dir").value : "", later, format: $("fmt").value || "",
+      hash: $("hash").value.trim(), mirrors: $("mirrors").value.split(/\s+/).filter(Boolean) });
+    answered = true;
+    window.close();
+    setTimeout(() => gone(later ? "Added to BDDM (paused). You can close this window." : "Download started. You can close this window."), 300);
+  } catch (e) {
+    $("err").textContent = e.message;
+    for (const b of ["start", "later", "cancel"]) $(b).disabled = false;
+  }
+}
+async function cancel() {
+  if (!answered) {
+    answered = true;
+    try { await api("/api/pending/" + encodeURIComponent(id) + "/cancel", {}); } catch (e) {}
+  }
+  window.close();
+  setTimeout(() => gone("Cancelled. You can close this window."), 300);
+}
+$("name").oninput = () => { nameTouched = true; };
+$("fmt").onchange = () => {
+  const n = $("name").value, f = $("fmt").value;
+  if (n) $("name").value = n.replace(/\.[A-Za-z0-9]{1,5}$/, "") + "." + f;
+};
+$("dir").oninput = () => { dirTouched = true; };
+$("start").onclick = () => start(false);
+$("later").onclick = () => start(true);
+$("cancel").onclick = cancel;
+$("browse").onclick = async () => {
+  $("browse").disabled = true;
+  try {
+    const r = await api("/api/pickfolder", { start: $("dir").value });
+    if (r.dir) { $("dir").value = r.dir; dirTouched = true; }
+  } catch (e) { $("err").textContent = "Folder picker: " + e.message; }
+  $("browse").disabled = false;
+};
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !$("start").disabled) { e.preventDefault(); start(false); }
+  if (e.key === "Escape") { e.preventDefault(); cancel(); }
+});
+// Closing the window with the X counts as Cancel.
+window.addEventListener("pagehide", () => {
+  if (answered) return;
+  answered = true;
+  fetch("/api/pending/" + encodeURIComponent(id) + "/cancel", {
+    method: "POST", keepalive: true, headers: { "Content-Type": "application/json" }, body: "{}",
+  }).catch(() => {});
+});
+load().then(() => { $("start").focus(); });
+</script>
+</body>
+</html>

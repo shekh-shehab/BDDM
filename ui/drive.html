@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Download Google Drive folder</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%233b82f6'/%3E%3Cpath d='M32 14v26m-11-11 11 11 11-11M18 48h28' stroke='white' stroke-width='6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #14161b; --panel: #1c1f26; --panel2: #232733; --line: #2e3340;
+    --text: #e6e8ee; --muted: #8b93a7; --accent: #3b82f6; --accent2: #2563eb;
+    --ok: #22c55e; --warn: #f59e0b; --bad: #ef4444;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { background: var(--bg); color: var(--text); font: 14px/1.4 "Segoe UI", system-ui, -apple-system, sans-serif; display: flex; flex-direction: column; }
+  header { display: flex; align-items: center; gap: 10px; padding: 12px 18px; background: var(--panel); border-bottom: 1px solid var(--line); font-weight: 700; font-size: 16px; }
+  header svg { width: 24px; height: 24px; flex: none; }
+  main { flex: 1; padding: 16px 18px 8px; overflow: auto; }
+  .field { margin-bottom: 13px; }
+  .field label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; margin-bottom: 5px; }
+  .line { display: flex; gap: 8px; }
+  input[type=text] { flex: 1; width: 100%; font: inherit; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 11px; outline: none; }
+  input:focus, select:focus { border-color: var(--accent); }
+  select { font: inherit; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 11px; outline: none; min-width: 200px; }
+  .value { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .value.muted { color: var(--muted); }
+  .row2 { display: flex; gap: 10px; }
+  .row2 .field { flex: 1; min-width: 0; }
+  .row2 .field.size { flex: 0 0 140px; }
+  button { font: inherit; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; cursor: pointer; white-space: nowrap; }
+  button:hover { border-color: #49506a; background: #2a2f3d; }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button.primary:hover { background: var(--accent2); }
+  .warn { display: none; gap: 10px; align-items: flex-start; background: #2b1a05; border: 1px solid #78350f; color: #fcd34d; border-radius: 10px; padding: 10px 12px; margin-bottom: 13px; font-size: 13px; }
+  .warn.show { display: flex; }
+  .warn b { color: #fde68a; word-break: break-all; }
+  .err { color: #fca5a5; font-size: 13px; min-height: 18px; }
+  footer { display: flex; gap: 8px; align-items: center; padding: 12px 18px; background: var(--panel); border-top: 1px solid var(--line); }
+  footer .spacer { flex: 1; }
+  .dim { color: var(--muted); font-size: 12px; }
+  .tree { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 6px 4px; max-height: 100%; overflow: auto; font-size: 13px; }
+  .node { display: flex; align-items: center; gap: 7px; padding: 3px 6px; border-radius: 6px; }
+  .node:hover { background: var(--panel2); }
+  .node .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .node .sz { color: var(--muted); flex: none; font-variant-numeric: tabular-nums; }
+  .node .tag { color: var(--warn); font-size: 12px; flex: none; }
+  .node.skip .nm { color: var(--muted); text-decoration: line-through; }
+  .kids { margin-left: 18px; border-left: 1px dashed var(--line); }
+  .tw { width: 16px; flex: none; cursor: pointer; color: var(--muted); user-select: none; text-align: center; }
+  .bar { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+  .bar .sum { color: var(--muted); font-size: 13px; margin-left: auto; }
+  main { display: flex; flex-direction: column; }
+  #treeBox { flex: 1; min-height: 120px; overflow: auto; margin-bottom: 12px; }
+  .ok { color: #86efac; font-size: 13px; }
+  label.chk { display: flex; gap: 6px; align-items: center; font-size: 13px; color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <svg viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#3b82f6"/><path d="M32 14v26m-11-11 11 11 11-11M18 48h28" stroke="white" stroke-width="6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  <span id="title">Google Drive folder</span>
+</header>
+<main>
+  <div class="bar">
+    <button id="all">Select all</button>
+    <button id="none">Select none</button>
+    <span class="sum" id="sum">Reading the folder...</span>
+  </div>
+  <div id="treeBox"><div class="tree" id="tree"><div class="dim" style="padding:8px">Reading the folder from Google Drive...</div></div></div>
+  <div class="field">
+    <label for="dir">Save to (a folder with the Drive folder's name is made inside)</label>
+    <div class="line">
+      <input id="dir" type="text" spellcheck="false" autocomplete="off">
+      <button id="browse">Change...</button>
+    </div>
+  </div>
+  <label class="chk"><input type="checkbox" id="again"> Also download files I downloaded before</label>
+  <div class="err" id="err"></div>
+</main>
+<footer>
+  <button id="later" title="Add them to the list paused">Download Later</button>
+  <span class="spacer"></span>
+  <button id="cancel">Cancel</button>
+  <button id="start" class="primary" disabled>Download</button>
+</footer>
+<script>
+const $ = (id) => document.getElementById(id);
+const id = new URLSearchParams(location.search).get("id") || "";
+let answered = false, dirTouched = false, root = null;
+const boxes = []; // {cb, node}
+
+async function api(path, body) {
+  const opt = body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
+  const r = await fetch(path, opt);
+  let data = {};
+  try { data = await r.json(); } catch (e) {}
+  if (!r.ok || data.ok === false) throw new Error(data.error || ("HTTP " + r.status));
+  return data;
+}
+function fmtBytes(n) {
+  if (!n || n <= 0) return "";
+  const u = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return (i === 0 ? n : n.toFixed(n >= 100 ? 0 : n >= 10 ? 1 : 2)) + " " + u[i];
+}
+function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+
+function render(node, parentEl, parentBoxes) {
+  for (const c of node.children || []) {
+    const row = el("div", "node" + (c.skip ? " skip" : ""));
+    const tw = el("span", "tw", c.folder ? "\u25BE" : "");
+    const cb = el("input"); cb.type = "checkbox";
+    const nm = el("span", "nm", (c.folder ? "\uD83D\uDCC1 " : "") + c.name + (c.docType ? " (." + c.export + ")" : ""));
+    nm.title = c.skip || c.name;
+    row.append(tw, cb, nm);
+    if (c.shortcut) row.append(el("span", "tag", "(shortcut)"));
+    if (c.skip && !c.folder) row.append(el("span", "tag", "(can't download)"));
+    row.append(el("span", "sz", c.folder ? "" : (c.docType ? "" : (fmtBytes(c.size) || "size ?"))));
+    parentEl.append(row);
+    const entry = { cb, node: c, kids: [] };
+    parentBoxes.push(entry);
+    if (c.folder) {
+      const kids = el("div", "kids");
+      parentEl.append(kids);
+      render(c, kids, entry.kids);
+      tw.onclick = () => { kids.hidden = !kids.hidden; tw.textContent = kids.hidden ? "\u25B8" : "\u25BE"; };
+      cb.checked = true;
+      cb.onchange = () => { setAll(entry.kids, cb.checked); update(); };
+      if (c.skip) { nm.textContent += " - " + c.skip; }
+    } else {
+      cb.checked = !c.shortcut && !c.skip;
+      cb.disabled = !!c.skip;
+      cb.onchange = update;
+      boxes.push({ cb, node: c });
+    }
+  }
+}
+function setAll(list, on) {
+  for (const e of list) {
+    if (!e.cb.disabled) e.cb.checked = on;
+    setAll(e.kids, on);
+  }
+}
+function update() {
+  let n = 0, size = 0, unknown = 0;
+  for (const b of boxes) if (b.cb.checked) { n++; if (b.node.size > 0) size += b.node.size; else unknown++; }
+  $("sum").textContent = n + " of " + boxes.length + " files selected" + (size ? " \u00b7 " + fmtBytes(size) : "") + (unknown ? " (+" + unknown + " of unknown size)" : "");
+  $("start").disabled = $("later").disabled = n === 0 || answered;
+}
+async function load() {
+  let v;
+  try { v = await api("/api/drive/" + encodeURIComponent(id)); }
+  catch (e) { gone(e.message); return; }
+  if (!dirTouched) $("dir").value = v.dir || "";
+  if (v.state === "loading") { setTimeout(load, 800); return; }
+  if (v.state === "error") { $("tree").textContent = ""; $("sum").textContent = ""; $("err").textContent = v.error; return; }
+  root = v.root;
+  $("title").textContent = "Google Drive folder: " + root.name;
+  document.title = root.name + " - Google Drive folder";
+  $("tree").textContent = "";
+  render(root, $("tree"), []);
+  if (!boxes.length) $("tree").append(el("div", "dim", "This folder is empty (or BDDM could not see its files)."));
+  if (v.foreign) $("err").textContent = "Note: " + v.foreign + " item(s) that belong to other folders were left out.";
+  update();
+}
+function gone(msg) {
+  answered = true;
+  $("err").textContent = msg;
+  for (const b of ["start", "later", "browse", "all", "none"]) $(b).disabled = true;
+  $("cancel").textContent = "Close";
+}
+async function start(later) {
+  const ids = boxes.filter((b) => b.cb.checked).map((b) => b.node.id);
+  $("err").textContent = "";
+  for (const b of ["start", "later"]) $(b).disabled = true;
+  try {
+    const r = await api("/api/drive/" + encodeURIComponent(id) + "/start", { ids, dir: $("dir").value, later, again: $("again").checked });
+    const res = r.result || {};
+    let msg = res.added + " file(s) added to BDDM" + (later ? " (paused)" : "") + ", saved in " + res.folder + ".";
+    if (res.skipped && res.skipped.length) msg += " " + res.skipped.length + " file(s) were downloaded before and skipped (tick \"Also download files I downloaded before\" to get them again).";
+    answered = true;
+    gone("");
+    const ok = el("div", "ok", msg);
+    $("err").replaceWith(ok);
+    if (!res.skipped || !res.skipped.length) setTimeout(() => window.close(), 1500);
+  } catch (e) {
+    $("err").textContent = e.message;
+    update();
+  }
+}
+async function cancel() {
+  if (!answered) {
+    answered = true;
+    try { await api("/api/drive/" + encodeURIComponent(id) + "/cancel", {}); } catch (e) {}
+  }
+  window.close();
+  setTimeout(() => gone("Closed. You can close this window."), 300);
+}
+$("all").onclick = () => { for (const b of boxes) if (!b.cb.disabled) b.cb.checked = true; update(); };
+$("none").onclick = () => { for (const b of boxes) b.cb.checked = false; update(); };
+$("dir").oninput = () => { dirTouched = true; };
+$("start").onclick = () => start(false);
+$("later").onclick = () => start(true);
+$("cancel").onclick = cancel;
+$("browse").onclick = async () => {
+  $("browse").disabled = true;
+  try {
+    const r = await api("/api/pickfolder", { start: $("dir").value });
+    if (r.dir) { $("dir").value = r.dir; dirTouched = true; }
+  } catch (e) { $("err").textContent = "Folder picker: " + e.message; }
+  $("browse").disabled = false;
+};
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.preventDefault(); cancel(); } });
+load();
+</script>
+</body>
+</html>

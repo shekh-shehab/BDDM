@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Download Video</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%233b82f6'/%3E%3Cpath d='M32 14v26m-11-11 11 11 11-11M18 48h28' stroke='white' stroke-width='6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #14161b; --panel: #1c1f26; --panel2: #232733; --line: #2e3340;
+    --text: #e6e8ee; --muted: #8b93a7; --accent: #3b82f6; --accent2: #2563eb;
+    --ok: #22c55e; --warn: #f59e0b; --bad: #ef4444;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { background: var(--bg); color: var(--text); font: 14px/1.4 "Segoe UI", system-ui, -apple-system, sans-serif; display: flex; flex-direction: column; }
+  header { display: flex; align-items: center; gap: 10px; padding: 12px 18px; background: var(--panel); border-bottom: 1px solid var(--line); font-weight: 700; font-size: 16px; }
+  header svg { width: 24px; height: 24px; flex: none; }
+  main { flex: 1; padding: 14px 18px 8px; overflow: auto; }
+  .top { display: flex; gap: 14px; margin-bottom: 14px; }
+  .thumb { width: 176px; height: 99px; flex: none; border-radius: 8px; background: var(--panel2) center/cover no-repeat; border: 1px solid var(--line); display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 28px; }
+  .meta { min-width: 0; flex: 1; }
+  .title { font-weight: 700; font-size: 15px; line-height: 1.3; max-height: 3.9em; overflow: hidden; word-break: break-word; }
+  .sub { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  .link { color: var(--muted); font-size: 12px; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .section { margin-bottom: 13px; }
+  .label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; margin-bottom: 6px; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .opt { display: flex; align-items: center; gap: 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; cursor: pointer; min-width: 0; }
+  .opt:hover { border-color: #49506a; }
+  .opt.sel { border-color: var(--accent); background: #172554; }
+  .opt input { margin: 0; accent-color: var(--accent); }
+  .opt .q { font-weight: 600; white-space: nowrap; }
+  .opt .s { color: var(--muted); font-size: 12px; margin-left: auto; white-space: nowrap; }
+  .opt.wide { grid-column: span 3; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .check { display: flex; gap: 7px; align-items: center; margin-right: 14px; }
+  .check input { accent-color: var(--accent); }
+  select, input[type=text] { font: inherit; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; outline: none; }
+  input[type=text] { flex: 1; width: 100%; }
+  input:focus, select:focus { border-color: var(--accent); }
+  button { font: inherit; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; cursor: pointer; white-space: nowrap; }
+  button:hover { border-color: #49506a; background: #2a2f3d; }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button.primary:hover { background: var(--accent2); }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin-bottom: 13px; }
+  .warn { background: #2b1a05; border-color: #78350f; color: #fcd34d; font-size: 13px; }
+  .bad { background: #2a0f12; border-color: #7f1d1d; color: #fca5a5; font-size: 13px; word-break: break-word; }
+  .bar { height: 6px; background: var(--panel2); border-radius: 99px; overflow: hidden; margin: 6px 0 2px; }
+  .bar > div { height: 100%; width: 0; background: var(--accent); border-radius: 99px; transition: width .4s; }
+  .tool { font-size: 12px; color: var(--muted); margin-top: 8px; }
+  .spin { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: r .8s linear infinite; vertical-align: -2px; margin-right: 8px; }
+  @keyframes r { to { transform: rotate(360deg); } }
+  .err { color: #fca5a5; font-size: 13px; min-height: 18px; }
+  footer { display: flex; gap: 8px; align-items: center; padding: 12px 18px; background: var(--panel); border-top: 1px solid var(--line); }
+  footer .spacer { flex: 1; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <svg viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#3b82f6"/><path d="M32 14v26m-11-11 11 11 11-11M18 48h28" stroke="white" stroke-width="6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  Download Video
+</header>
+<main>
+  <div class="top">
+    <div class="thumb" id="thumb">&#9654;</div>
+    <div class="meta">
+      <div class="title" id="title">Getting video info...</div>
+      <div class="sub" id="sub"></div>
+      <div class="link" id="link"></div>
+    </div>
+  </div>
+
+  <div class="card" id="toolsCard" hidden>
+    <b>Video tools needed</b>
+    <div style="margin-top:4px;font-size:13px">BDDM uses the free tools <b>yt-dlp</b>, <b>ffmpeg</b> and <b>deno</b> to download videos.
+      They are downloaded once (about <span id="toolsMB">180</span> MB) into BDDM's own folder.</div>
+    <div id="toolsProg"></div>
+    <div class="row" style="margin-top:10px"><button id="installTools" class="primary">Download tools</button><span class="err" id="toolsErr"></span></div>
+  </div>
+
+  <div class="card" id="loadingCard"><span class="spin"></span>Getting video info...</div>
+  <div class="card bad" id="errorCard" hidden><div id="errorText"></div><div class="row" style="margin-top:8px"><button id="retry">Try again</button></div></div>
+
+  <div id="choices" hidden>
+    <div class="card warn" id="dup" hidden></div>
+    <div class="section" id="plSection" hidden>
+      <span class="label">Playlist</span>
+      <div class="grid">
+        <label class="opt wide" id="plOneWrap"><input type="radio" name="pl" value="one" checked><span class="q">Only this video</span></label>
+        <label class="opt wide"><input type="radio" name="pl" value="all"><span class="q" id="plAllText">Whole playlist</span></label>
+      </div>
+    </div>
+    <div class="section">
+      <span class="label">Quality</span>
+      <div class="grid" id="qualities"></div>
+    </div>
+    <div class="section">
+      <span class="label">Extras</span>
+      <div class="row">
+        <label class="check"><input type="checkbox" id="thumbOpt"> Save thumbnail</label>
+        <label class="check"><input type="checkbox" id="subsOpt"> Subtitles</label>
+        <select id="subLang" disabled></select>
+      </div>
+    </div>
+    <div class="section">
+      <span class="label">Save to</span>
+      <div class="row" style="flex-wrap:nowrap">
+        <input id="dir" type="text" spellcheck="false" autocomplete="off">
+        <button id="browse">Change...</button>
+      </div>
+    </div>
+  </div>
+  <div class="err" id="err"></div>
+</main>
+<footer>
+  <button id="later" title="Add it to the list paused; press Resume when you want it">Download Later</button>
+  <span class="spacer"></span>
+  <button id="cancel">Cancel</button>
+  <button id="start" class="primary" disabled>Start Download</button>
+</footer>
+<script>
+const $ = (id) => document.getElementById(id);
+const id = new URLSearchParams(location.search).get("id") || "";
+let answered = false, built = false, dirTouched = false, view = null;
+
+async function api(path, body) {
+  const opt = body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
+  const r = await fetch(path, opt);
+  let data = {};
+  try { data = await r.json(); } catch (e) {}
+  if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
+  return data;
+}
+function fmtBytes(n) {
+  if (!n || n <= 0) return "";
+  const u = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return "~" + (n >= 100 ? n.toFixed(0) : n.toFixed(1)) + " " + u[i];
+}
+function fmtDur(s) {
+  if (!s) return "";
+  s = Math.round(s);
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60;
+  return (h ? h + ":" + String(m).padStart(2, "0") : m) + ":" + String(x).padStart(2, "0");
+}
+function shortUrl(u) {
+  try { const x = new URL(u); let p = x.pathname + x.search; if (p.length > 60) p = p.slice(0, 57) + "..."; return x.host + p; } catch (e) { return u; }
+}
+function gone(msg) {
+  answered = true;
+  $("err").textContent = msg;
+  for (const b of ["start", "later", "browse"]) $(b).disabled = true;
+  $("cancel").textContent = "Close";
+}
+function opt(name, value, label, size, checked, wide) {
+  const l = document.createElement("label");
+  l.className = "opt" + (wide ? " wide" : "") + (checked ? " sel" : "");
+  const i = document.createElement("input");
+  i.type = "radio"; i.name = name; i.value = value; i.checked = !!checked;
+  const q = document.createElement("span"); q.className = "q"; q.textContent = label;
+  const s = document.createElement("span"); s.className = "s"; s.textContent = size || "";
+  l.append(i, q, s);
+  return l;
+}
+function markSelected(container) {
+  for (const l of container.querySelectorAll(".opt")) l.classList.toggle("sel", l.querySelector("input").checked);
+}
+function build(v) {
+  built = true;
+  const info = v.info || {};
+  const q = $("qualities");
+  q.innerHTML = "";
+  const heights = (info.qualities || []);
+  const def = heights.find((h) => h.height <= 1080) || heights[0];
+  q.append(opt("q", "best", "Best available", heights[0] ? heights[0].label : "", !def, false));
+  for (const h of heights) q.append(opt("q", String(h.height), h.label, fmtBytes(h.size), def && h.height === def.height, false));
+  q.append(opt("q", "mp3", "Audio only (MP3)", fmtBytes(info.audioSize), false, false));
+  q.append(opt("q", "m4a", "Audio only (M4A)", fmtBytes(info.audioSize), false, false));
+  // keep the grid tidy: the audio options get a full row each when the count does not fit
+  q.onchange = () => markSelected(q);
+  const sl = $("subLang");
+  sl.innerHTML = "";
+  const subs = info.subtitles || [];
+  for (const s of subs) {
+    const o = document.createElement("option");
+    o.value = s.code; o.textContent = s.name + (s.auto ? " (auto)" : "");
+    sl.append(o);
+  }
+  const en = subs.find((s) => /^en/.test(s.code));
+  if (en) sl.value = en.code;
+  $("subsOpt").disabled = subs.length === 0;
+  sl.hidden = subs.length === 0;
+  $("subsOpt").parentElement.title = subs.length ? "" : "This video has no subtitles";
+  $("subsOpt").onchange = () => { sl.disabled = !$("subsOpt").checked; };
+  if (v.playlist && v.playlist.count > 0) {
+    $("plSection").hidden = false;
+    $("plAllText").textContent = "Whole playlist (" + v.playlist.count + " videos)" + (v.playlist.title ? " - " + v.playlist.title : "");
+    if (info.noVideo) {
+      $("plOneWrap").hidden = true;
+      document.querySelector('input[name=pl][value=all]').checked = true;
+    }
+    markSelected($("plSection"));
+    $("plSection").onchange = () => markSelected($("plSection"));
+  }
+  if (v.duplicate) {
+    $("dup").hidden = false;
+    $("dup").textContent = "You already downloaded this video (" + v.duplicate + "). You can download it again.";
+    $("start").textContent = "Download again";
+  }
+}
+function showTools(t) {
+  $("toolsCard").hidden = false;
+  $("toolsMB").textContent = t.downloadMB || 180;
+  const p = $("toolsProg");
+  p.innerHTML = "";
+  for (const x of t.progress || []) {
+    const d = document.createElement("div"); d.className = "tool";
+    const pct = x.total > 0 ? Math.min(100, x.done * 100 / x.total) : 0;
+    d.textContent = x.name + ": " + (x.state === "done" ? "ready" : x.state === "error" ? "failed" : x.state === "waiting" ? "waiting" : (x.done / 1048576).toFixed(1) + " / " + (x.total / 1048576).toFixed(0) + " MB");
+    const bar = document.createElement("div"); bar.className = "bar";
+    const f = document.createElement("div"); f.style.width = (x.state === "done" ? 100 : pct).toFixed(1) + "%";
+    bar.append(f); d.append(bar); p.append(d);
+  }
+  $("installTools").disabled = t.installing || !t.canInstall;
+  $("installTools").textContent = t.installing ? "Downloading..." : (t.error ? "Try again" : "Download tools");
+  $("toolsErr").textContent = t.error || (t.canInstall ? "" : "Install yt-dlp and ffmpeg yourself on this system.");
+}
+async function load() {
+  let v;
+  try { v = await api("/api/video/" + encodeURIComponent(id)); }
+  catch (e) { gone(e.message); $("loadingCard").hidden = true; return; }
+  view = v;
+  const info = v.info || {};
+  $("title").textContent = info.title || v.title || "Video";
+  document.title = "Download Video - " + (info.title || v.title || "");
+  const sub = [info.site, info.uploader, fmtDur(info.duration), info.isLive ? "LIVE" : ""].filter(Boolean).join("  ·  ");
+  $("sub").textContent = sub;
+  $("link").textContent = shortUrl(v.url); $("link").title = v.url;
+  if (info.thumbnail) { $("thumb").style.backgroundImage = "url(" + JSON.stringify(info.thumbnail) + ")"; $("thumb").textContent = ""; }
+  if (!dirTouched) $("dir").value = v.dir || "";
+  $("loadingCard").hidden = v.state !== "loading";
+  $("errorCard").hidden = v.state !== "error";
+  $("errorText").textContent = v.error || "";
+  if (v.state === "tools") showTools(v.tools); else if (!(v.tools && v.tools.installing)) $("toolsCard").hidden = true;
+  if (v.state === "ready") {
+    $("toolsCard").hidden = true;
+    if (!built) build(v);
+    $("choices").hidden = false;
+    $("start").disabled = false;
+    return;
+  }
+  setTimeout(load, v.state === "tools" ? 700 : 900);
+}
+function choice(name) { const i = document.querySelector("input[name=" + name + "]:checked"); return i ? i.value : ""; }
+async function start(later) {
+  $("err").textContent = "";
+  for (const b of ["start", "later", "cancel"]) $(b).disabled = true;
+  try {
+    await api("/api/video/" + encodeURIComponent(id) + "/start", {
+      quality: choice("q") || "best", thumb: $("thumbOpt").checked,
+      subs: $("subsOpt").checked && !!$("subLang").value, subLang: $("subLang").value,
+      playlist: choice("pl") === "all", dir: dirTouched ? $("dir").value : "", later,
+    });
+    answered = true;
+    window.close();
+    setTimeout(() => gone(later ? "Added to BDDM (paused). You can close this window." : "Download started. You can close this window."), 300);
+  } catch (e) {
+    $("err").textContent = e.message;
+    for (const b of ["start", "later", "cancel"]) $(b).disabled = false;
+  }
+}
+async function cancel() {
+  if (!answered) {
+    answered = true;
+    try { await api("/api/pending/" + encodeURIComponent(id) + "/cancel", {}); } catch (e) {}
+  }
+  window.close();
+  setTimeout(() => gone("Cancelled. You can close this window."), 300);
+}
+$("dir").oninput = () => { dirTouched = true; };
+$("start").onclick = () => start(false);
+$("later").onclick = () => start(true);
+$("cancel").onclick = cancel;
+$("retry").onclick = async () => { try { await api("/api/video/" + encodeURIComponent(id) + "/retry", {}); } catch (e) {} load(); };
+$("installTools").onclick = async () => {
+  try { await api("/api/tools/install", {}); } catch (e) { $("toolsErr").textContent = e.message; }
+};
+$("browse").onclick = async () => {
+  $("browse").disabled = true;
+  try {
+    const r = await api("/api/pickfolder", { start: $("dir").value });
+    if (r.dir) { $("dir").value = r.dir; dirTouched = true; }
+  } catch (e) { $("err").textContent = "Folder picker: " + e.message; }
+  $("browse").disabled = false;
+};
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !$("start").disabled && e.target.tagName !== "SELECT") { e.preventDefault(); start(false); }
+  if (e.key === "Escape") { e.preventDefault(); cancel(); }
+});
+window.addEventListener("pagehide", () => {
+  if (answered) return;
+  answered = true;
+  fetch("/api/pending/" + encodeURIComponent(id) + "/cancel", {
+    method: "POST", keepalive: true, headers: { "Content-Type": "application/json" }, body: "{}",
+  }).catch(() => {});
+});
+load();
+</script>
+</body>
+</html>

@@ -1,0 +1,171 @@
+BDDM 1.4.1 - installing on a Windows computer
+=============================================
+
+1. Install BDDM
+---------------
+Run BDDM-Setup.exe. It installs for your Windows account only (no
+administrator password needed) into:
+    %LOCALAPPDATA%\Programs\BDDM
+Settings and download history are kept in %APPDATA%\BDDM, so updating
+(running a newer BDDM-Setup.exe) keeps everything.
+
+Windows may show "Windows protected your PC" because the setup file is not
+signed with a paid certificate. Click "More info", then "Run anyway".
+
+During setup you can choose:
+  - Desktop shortcut
+  - Start BDDM with Windows (it starts in the background, so the browser
+    extension always finds it). You can change this later in BDDM >
+    Settings > "Start BDDM with Windows".
+
+The first time you download a video, BDDM downloads its video tools
+(yt-dlp, ffmpeg, deno) by itself.
+
+To remove BDDM: Windows Settings > Apps > "BDDM Download Manager" >
+Uninstall (or Start menu > BDDM > Uninstall BDDM). Your downloaded files
+are never deleted.
+
+
+2. Add the browser extension
+----------------------------
+The extension sends your browser's downloads and videos to BDDM. BDDM must
+be running (the extension says so if it is not).
+
+The extension files are in the BDDM folder:
+    %LOCALAPPDATA%\Programs\BDDM\extension\chromium      (Chrome, Edge, Brave, Opera, Vivaldi)
+    %LOCALAPPDATA%\Programs\BDDM\extension\BDDM-firefox-signed.xpi   (Firefox)
+Start menu > BDDM > "Browser extension folder" opens it.
+Do not move or delete the "chromium" folder: the browser loads the
+extension from there. Updating BDDM updates the files in place; after an
+update, click the reload button of BDDM on the extensions page.
+
+Google Chrome
+  1. Open a new tab and go to:  chrome://extensions
+  2. Turn on "Developer mode" (top right).
+  3. Click "Load unpacked" and choose the folder
+     %LOCALAPPDATA%\Programs\BDDM\extension\chromium
+     (paste that path into the folder box and press Enter).
+  4. Optional: click the puzzle icon and pin "BDDM Download Catcher".
+
+Microsoft Edge
+  1. Go to:  edge://extensions
+  2. Turn on "Developer mode" (left side, at the bottom).
+  3. Click "Load unpacked" and choose the same "chromium" folder.
+
+Brave
+  1. Go to:  brave://extensions
+  2. Turn on "Developer mode" (top right).
+  3. Click "Load unpacked" and choose the same "chromium" folder.
+
+Opera (opera://extensions) and Vivaldi (vivaldi://extensions) work the
+same way.
+
+Why "Load unpacked"? Chrome, Edge and Brave only install packaged
+extensions (.crx files) from their web stores. A .crx file from anywhere
+else is blocked or switched off, so loading the folder is the way to use
+an extension that is not in a store. Chrome may sometimes remind you that
+a developer-mode extension is installed; that is normal.
+
+Firefox
+  Firefox only installs extensions signed by Mozilla.
+  - Signed file (recommended): BDDM-firefox-signed.xpi in the extension
+    folder above is signed by Mozilla and stays installed. Drag it into a
+    Firefox window (or about:addons > gear > "Install Add-on From File...")
+    and click "Add". It is not published on addons.mozilla.org; it is only
+    signed.
+  - Without the signed file: go to  about:debugging#/runtime/this-firefox ,
+    click "Load Temporary Add-on..." and choose BDDM-firefox.xpi.
+    Firefox removes it when Firefox is closed, so this is only for trying.
+    (Firefox Developer Edition, Nightly and ESR can install the unsigned
+    file permanently after setting xpinstall.signatures.required to false
+    in about:config, then about:addons > gear > "Install Add-on From File".)
+  - Signing a new version yourself: with free API keys from
+    https://addons.mozilla.org/developers/addon/api/key/ run, in the BDDM
+    source folder:
+        set WEB_EXT_API_KEY=...
+        set WEB_EXT_API_SECRET=...
+        extension\sign-firefox.cmd
+    (needs Node.js and Python). It writes a signed .xpi to
+    extension\signed\. Open that file with Firefox (drag it into a Firefox
+    window) to install it. Mozilla signs each version only once, so a
+    changed extension needs a higher "version" in
+    extension\manifests\base.json before signing.
+
+
+3. What is new in 1.4.1
+-----------------------
+Fewer "HTTP 403 Forbidden" errors on sites where the browser itself can
+download (update the browser extension too: click its reload button on the
+extensions page, or install the new BDDM-firefox-signed.xpi in Firefox):
+- BDDM now asks the website exactly like your browser does: the same
+  browser name (User-Agent), languages, page address (Referer), Origin
+  and the special headers a site's video player sends. These headers are
+  kept in memory only and are never sent to mirror links.
+- Cookies are sent to every server involved, also when a link moves on to
+  another server (a CDN), and Chrome's per-site cookies are included.
+- Video and audio files found on a page (.mp4, .webm, .mp3 ...) are
+  downloaded by BDDM's fast engine instead of the video tools.
+- Video streams get the same browser details and cookies (through a
+  temporary cookie file that is deleted right after).
+- Fewer extra requests before a download starts, so links that work only
+  once or a few times are not used up.
+- When a site still refuses, BDDM says so plainly and explains what to do.
+
+
+4. What was new in 1.4.0
+------------------------
+- Internet drops: downloads wait ("No internet connection. BDDM
+  continues automatically when the connection is back") and continue by
+  themselves when the internet comes back. This works for normal files and for videos (YouTube and other
+  streams continue from the pieces already downloaded).
+- Unfinished downloads continue when BDDM starts again (after closing it,
+  a crash or a power cut). Settings > "Continue unfinished downloads when
+  BDDM starts" turns this off.
+- Checksums: when the server gives a checksum, or you enter one (MD5,
+  SHA-1, SHA-256 or SHA-512) under "Options" or "More options" in the
+  "Download File Info" window, BDDM checks the finished file. If a piece
+  is damaged, only that piece is downloaded again. Finished downloads show
+  "checked" when the file was verified.
+- Mirror links: under "Options" you can add other links to the same file
+  (one per line). BDDM downloads parts from all of them at once and stops
+  using a link that does not work.
+- Slow connections: if one connection is much slower than the others,
+  BDDM closes it and opens a new one.
+- If a server name has several addresses and one does not answer, BDDM
+  tries the others; if your DNS fails, BDDM asks public DNS servers.
+- Queue: Settings > "Downloads at the same time" sets how many run at
+  once; the rest wait in the queue and start by themselves. Use
+  "Start next", up and down to change the order.
+- Errors are explained in plain words, with what to do about them.
+
+
+5. What was new in 1.3.0
+------------------------
+- Folders by file type: Settings > "Folders by file type" sets a folder
+  for Video, Audio, Documents, Compressed, Programs, Images and Other.
+  When you choose another folder in the "Download File Info" window, BDDM
+  remembers it for that type of file.
+- Expired download links: if a site's link expires during a download,
+  BDDM says so; click the download again on the website and BDDM
+  continues where it stopped (Google Drive links are renewed by BDDM
+  itself).
+- If the file on the server changes during a download (new version),
+  BDDM starts it again instead of making a broken file.
+- Servers that allow only a few connections: BDDM uses fewer connections
+  for that server and remembers it for a while.
+- Not enough disk space: BDDM checks before it starts and tells you how
+  much space is needed.
+- Safer after a power cut: download progress is saved safely every few
+  seconds.
+- Save as PDF for view-only Google Drive files now also works in Chrome,
+  Edge and Brave.
+
+
+6. Running from the source code (developers)
+--------------------------------------------
+Install Go (the version in go.mod or newer), unzip BDDM-src.zip and run, in that folder:
+    go run .
+Build the Windows program and the setup file:
+    go build -trimpath -ldflags "-H windowsgui -s -w" -o build\BDDM.exe .
+    python extension\build.py
+    makensis installer\BDDM.nsi        (NSIS 3, https://nsis.sourceforge.io)

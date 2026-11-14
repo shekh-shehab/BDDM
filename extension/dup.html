@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>BDDM - Already downloaded</title>
+<link rel="stylesheet" href="popup.css">
+<style>
+  body { width:auto; padding:18px; }
+  h3 { margin:0 0 8px; font-size:15px; }
+  .name { font-weight:600; word-break:break-all; margin:6px 0 4px; }
+  .buttons { display:flex; justify-content:flex-end; gap:8px; margin-top:16px; }
+  .buttons button.primary { width:auto; margin:0; }
+  .err { color:#fca5a5; font-size:12px; margin-top:8px; }
+</style>
+</head>
+<body>
+  <header><img src="icons/icon32.png" alt=""><span class="title">Already downloaded</span></header>
+  <div>You already downloaded this file with BDDM:</div>
+  <div class="name" id="name">-</div>
+  <div class="hint">Download it again? BDDM will save it with a new name.</div>
+  <div class="err" id="err"></div>
+  <div class="buttons">
+    <button id="cancel">Cancel</button>
+    <button id="again" class="primary">Download again</button>
+  </div>
+  <script src="compat.js"></script>
+  <script src="dup.js"></script>
+</body>
+</html>

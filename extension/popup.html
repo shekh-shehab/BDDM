@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>BDDM</title>
+<link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <img src="icons/icon32.png" alt="">
+    <span class="title">BDDM</span>
+    <span id="status" class="status checking">Checking...</span>
+  </header>
+
+  <section id="videos" hidden>
+    <div class="vhead"><span class="label">Videos on this page</span> <span id="videoCount" class="hint"></span></div>
+    <ul id="videoList"></ul>
+    <div id="videoMsg" class="help" hidden></div>
+  </section>
+
+  <div class="row">
+    <div>
+      <div class="label">Catch downloads</div>
+      <div class="hint">Send browser downloads to BDDM</div>
+    </div>
+    <label class="switch"><input type="checkbox" id="enabled"><span></span></label>
+  </div>
+
+  <div class="row" id="siteRow">
+    <div>
+      <div class="label">On this site</div>
+      <div class="hint" id="siteName">-</div>
+    </div>
+    <label class="switch"><input type="checkbox" id="siteOn"><span></span></label>
+  </div>
+
+  <div id="permRow" class="help" hidden>
+    BDDM needs permission to read download links and cookies on websites.
+    <button id="grant" class="small">Allow access</button>
+  </div>
+  <button id="open" class="primary">Open BDDM</button>
+  <div id="offlineHelp" class="help" hidden>
+    BDDM is not running. Start it first (run <b>go run .</b> in your BDDM folder, or open BDDM.exe).
+    Until then, your browser downloads files itself.
+  </div>
+
+  <details>
+    <summary>Sites to skip</summary>
+    <div class="hint">One site per line, for example <i>example.com</i>. Downloads from these sites stay in your browser.</div>
+    <textarea id="excluded" rows="5" spellcheck="false"></textarea>
+    <button id="save" class="small">Save</button> <span id="saved" class="hint"></span>
+  </details>
+
+  <div class="tips">
+    Files under 10 KB stay in your browser.<br>
+    Hold <b>Alt</b> while clicking a link to let your browser download it.<br>
+    Right-click a link and choose <b>Download with BDDM</b>.<br>
+    On a video page, the BDDM button shows a number: open it to download the video.
+  </div>
+  <script src="compat.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
