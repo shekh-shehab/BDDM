@@ -1,0 +1,15 @@
+# Build outputs and packaged releases
+build/
+*.exe
+*.xpi
+*.zip
+extension/signed/
+
+# Local compile of the Linux helper binary
+/bddm
+
+# Secrets and local environment
+.env
+.env.*
+*.pem
+*.key
