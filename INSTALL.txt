@@ -1,4 +1,4 @@
-BDDM 1.4.1 - installing on a Windows computer
+BDDM 1.4.2 - installing on a Windows computer
 =============================================
 
 1. Install BDDM
@@ -92,8 +92,43 @@ Firefox
     extension\manifests\base.json before signing.
 
 
-3. What is new in 1.4.1
+3. What is new in 1.4.2
 -----------------------
+Update the browser extension too (click its reload button on the
+extensions page, or install the new BDDM-firefox-signed.xpi in Firefox).
+The extension's own version number is 1.4.2.1 (Mozilla signs each number
+only once).
+- Streaming sites whose player runs in a frame from another site (for
+  example anikoto -> megaplay.buzz): BDDM sends the same Referer as the
+  browser (often only the player's site, e.g. "https://megaplay.buzz/").
+  If the video server still answers 403, BDDM tries the player's full
+  address and the tab's page, and remembers for that video server which
+  one worked.
+- Streams whose pieces are hidden behind a small picture (a fake PNG in
+  front of the video data) are downloaded and made into a normal MP4 (or
+  MP3/M4A); ffmpeg is told to read the pieces as MPEG-TS.
+- The quality list (1080p, 720p, ...) comes from the stream's master
+  playlist, with size guesses; when only one quality's playlist was found,
+  BDDM uses the master playlist next to it.
+- movielinkbd.tv and similar sites: playlists without ".m3u8" in the
+  address that are sent as a picture (image/jpeg) are now found by their
+  content. The extension reads them from the player's own frame, so the
+  request has the player's Origin and Referer, and BDDM sends them too. A
+  "#EXT-X-ERROR:forbidden" answer counts as a refusal (other Referers
+  are tried).
+- Clean file names: when a link has no useful name ("stream.mp4",
+  "video.mp4", "download", a long random id), the file is named after the
+  page title, without the site name or "Watch ... online", and without
+  characters Windows does not allow.
+- Send Anywhere (send-anywhere.com, sendanywhe.re): its download links
+  work only once, so the extension leaves these downloads to the browser.
+  If such a link still reaches BDDM, it is asked for exactly once (no size
+  check first, one connection); a Send Anywhere page link gets a plain
+  explanation.
+
+
+4. What was new in 1.4.1
+------------------------
 Fewer "HTTP 403 Forbidden" errors on sites where the browser itself can
 download (update the browser extension too: click its reload button on the
 extensions page, or install the new BDDM-firefox-signed.xpi in Firefox):
@@ -112,7 +147,7 @@ extensions page, or install the new BDDM-firefox-signed.xpi in Firefox):
 - When a site still refuses, BDDM says so plainly and explains what to do.
 
 
-4. What was new in 1.4.0
+5. What was new in 1.4.0
 ------------------------
 - Internet drops: downloads wait ("No internet connection. BDDM
   continues automatically when the connection is back") and continue by
@@ -139,7 +174,7 @@ extensions page, or install the new BDDM-firefox-signed.xpi in Firefox):
 - Errors are explained in plain words, with what to do about them.
 
 
-5. What was new in 1.3.0
+6. What was new in 1.3.0
 ------------------------
 - Folders by file type: Settings > "Folders by file type" sets a folder
   for Video, Audio, Documents, Compressed, Programs, Images and Other.
@@ -161,7 +196,7 @@ extensions page, or install the new BDDM-firefox-signed.xpi in Firefox):
   Edge and Brave.
 
 
-6. Running from the source code (developers)
+7. Running from the source code (developers)
 --------------------------------------------
 Install Go (the version in go.mod or newer), unzip BDDM-src.zip and run, in that folder:
     go run .

@@ -28,7 +28,7 @@ import (
 const port = "9614"
 
 // appVersion is the BDDM version (the extension has the same number).
-const appVersion = "1.4.1"
+const appVersion = "1.4.2"
 
 func main() {
 	noWindow := flag.Bool("nowindow", false, "do not open the window (run in the background)")
