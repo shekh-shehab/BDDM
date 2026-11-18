@@ -201,6 +201,13 @@ func (m *Manager) AddVideoPending(r AddRequest) (JobView, error) {
 		Status: StatusPending, Started: time.Now(), Kind: "video", vpend: vp,
 	}
 	j.applyBrowser(r)
+	if isStreamJob(j) {
+		j.refFrame = firstNonEmpty(r.Frame, r.Referer)
+		j.refPage = r.Page
+		if captured(r.Headers, "Referer") == "" {
+			j.useRememberedReferer(j.refFrame, j.refPage)
+		}
+	}
 	if !m.tools.Ready() {
 		vp.state = "tools"
 	}
@@ -503,6 +510,32 @@ func (m *Manager) probeVideo(j *Job) {
 	playlistToo := hasPlaylist(j.URL)
 	m.mu.Unlock()
 
+	// HLS: read the playlist ourselves first (qualities, a master next to a
+	// single-quality link, pieces hidden behind a picture; disguise.go).
+	var look *hlsLook
+	if isHLSJob(j) {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		l, err := m.lookAtHLS(ctx, j)
+		cancel()
+		if err == nil {
+			look = l
+			m.mu.Lock()
+			if l.Master2 != "" && !l.Master {
+				log.Printf("[%s] using the master playlist %s (all qualities)", j.Name, l.Master2)
+				j.URL = l.Master2
+			}
+			j.TSFix = l.Hidden
+			kind := refererKind(j.Referer, j.refFrame, j.refPage)
+			m.mu.Unlock()
+			refMem.remember(hostOfLink(j.URL), kind)
+			if l.Hidden {
+				log.Printf("[%s] the stream's pieces are video data behind a picture; ffmpeg will read them as MPEG-TS", j.Name)
+			}
+		} else {
+			log.Printf("[%s] reading the playlist: %v", j.Name, err)
+		}
+	}
+
 	var wg sync.WaitGroup
 	var info *VideoInfo
 	var pl, pl2 *PlaylistInfo
@@ -511,9 +544,19 @@ func (m *Manager) probeVideo(j *Job) {
 	go func() {
 		defer wg.Done()
 		data, err := m.runJSON(j, "--no-playlist")
+		if err != nil && isStreamJob(j) && isRefused(err.Error()) {
+			// 403: try the other Referers a player could send (referer.go).
+			data, err = m.retryReferers(j, err)
+		}
 		if err != nil {
 			infoErr = err
 			return
+		}
+		if isStreamJob(j) {
+			m.mu.Lock()
+			kind := refererKind(j.Referer, j.refFrame, j.refPage)
+			m.mu.Unlock()
+			refMem.remember(hostOfLink(j.URL), kind)
 		}
 		info = parseVideoInfo(data)
 		if t, _ := data["_type"].(string); t == "playlist" {
@@ -562,6 +605,13 @@ func (m *Manager) probeVideo(j *Job) {
 	if info == nil {
 		info = &VideoInfo{Title: pl.Title, NoVideo: true}
 	}
+	if look != nil && len(look.Qualities) > 0 && !info.NoVideo {
+		if len(info.Qualities) == 0 {
+			info.Qualities = qualitiesFromMaster(look.Qualities, info.Duration)
+		} else {
+			addMasterSizes(info, look.Qualities)
+		}
+	}
 	if info.NoVideo && len(info.Qualities) == 0 {
 		for _, h := range []int{2160, 1440, 1080, 720, 480, 360} {
 			info.Qualities = append(info.Qualities, QualityOpt{Height: h, Label: fmt.Sprintf("%dp", h)})
@@ -577,6 +627,66 @@ func (m *Manager) probeVideo(j *Job) {
 	if info.Title != "" && !isStreamJob(j) {
 		j.Name = info.Title
 	}
+}
+
+// retryReferers asks yt-dlp again with each other Referer (after a 403).
+// The first one the site does not refuse is kept.
+func (m *Manager) retryReferers(j *Job, first error) (map[string]any, error) {
+	m.mu.Lock()
+	orig := j.Referer
+	alts := append([]string(nil), j.RefAlts...)
+	m.mu.Unlock()
+	for _, ref := range alts {
+		m.mu.Lock()
+		j.Referer = ref
+		m.mu.Unlock()
+		data, err := m.runJSON(j, "--no-playlist")
+		if err == nil || !isRefused(err.Error()) {
+			// Not refused any more (even if something else is wrong):
+			// keep this Referer, the others become the alternatives.
+			m.mu.Lock()
+			j.RefAlts = otherReferers(alts, ref, orig)
+			m.mu.Unlock()
+			log.Printf("[%s] the stream works with Referer %s", j.Name, ref)
+			return data, err
+		}
+	}
+	m.mu.Lock()
+	j.Referer = orig
+	m.mu.Unlock()
+	return nil, first
+}
+
+// nextReferer switches a stream download to its next other Referer after
+// a 403 (each is tried once per run). Reports whether there was one.
+func (m *Manager) nextReferer(j *Job) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !isStreamJob(j) || len(j.RefAlts) == 0 {
+		return false
+	}
+	if j.refTried == nil {
+		j.refTried = map[string]bool{j.Referer: true}
+	}
+	for _, a := range j.RefAlts {
+		if !j.refTried[a] {
+			j.refTried[a] = true
+			old := j.Referer
+			j.Referer = a
+			var rest []string
+			for _, b := range j.RefAlts {
+				if b != a {
+					rest = append(rest, b)
+				}
+			}
+			if old != "" {
+				rest = append([]string{old}, rest...)
+			}
+			j.RefAlts = rest
+			return true
+		}
+	}
+	return false
 }
 
 // isHLSJob: a stream job whose playlist is HLS (.m3u8).
@@ -809,8 +919,27 @@ func (m *Manager) videoArgs(j *Job) (args []string, done func()) {
 		args = append(args, "--abort-on-unavailable-fragments")
 	}
 	args = append(args, outputArgs(j, opt)...)
-	args = append(args, formatArgs(opt)...)
-	if opt.Quality != "mp3" && opt.Quality != "m4a" && isStreamJob(j) {
+	audioOnly := opt.Quality == "mp3" || opt.Quality == "m4a"
+	if j.TSFix {
+		// Pieces behind a picture (disguise.go): ffmpeg must read them as
+		// MPEG-TS; audio is converted by BDDM after the download, from a
+		// file of its own name (never an earlier video of the same title).
+		args = append(args, hiddenArgs()...)
+		if audioOnly {
+			for k := len(args) - 1; k > 0; k-- {
+				if args[k-1] == "-o" {
+					args[k] = strings.TrimSuffix(args[k], ".%(ext)s") + hiddenAudioMark + ".%(ext)s"
+					break
+				}
+			}
+			args = append(args, "-f", "ba/b")
+		} else {
+			args = append(args, formatArgs(opt)...)
+		}
+	} else {
+		args = append(args, formatArgs(opt)...)
+	}
+	if !audioOnly && isStreamJob(j) && !j.TSFix {
 		args = append(args, "--remux-video", "mp4")
 	}
 	if opt.Thumb {
@@ -902,6 +1031,10 @@ func (m *Manager) runVideo(ctx context.Context, j *Job) error {
 		err := m.runVideoOnce(ctx, j)
 		if err == nil || ctx.Err() != nil {
 			return err
+		}
+		if isRefused(err.Error()) && m.nextReferer(j) {
+			j.setMessage("The site refused the stream (403); trying another Referer...")
+			continue
 		}
 		frag := isFragmentFail(err)
 		if !isNetErr(err) && !frag {
@@ -1194,6 +1327,32 @@ func (m *Manager) runVideoOnce(ctx context.Context, j *Job) (rerr error) {
 			msg = werr.Error()
 		}
 		return errors.New(friendlyJobError(j, msg))
+	}
+	m.mu.Lock()
+	tsfix := j.TSFix
+	quality := "best"
+	if j.Video != nil {
+		quality = j.Video.Quality
+	}
+	m.mu.Unlock()
+	if tsfix {
+		// Still a picture in front (no joining was needed, or audio only):
+		// BDDM makes a normal file of it (disguise.go).
+		for k, p := range finalFiles {
+			audioLeft := (quality == "mp3" || quality == "m4a") && strings.Contains(filepath.Base(p), hiddenAudioMark+".")
+			if !fileHidden(p) && !audioLeft {
+				continue
+			}
+			j.setMessage("Fixing the video (its pieces were hidden behind a picture)...")
+			np, err := repairHidden(ctx, m.tools.Find("ffmpeg"), p, quality)
+			if err != nil {
+				return err
+			}
+			finalFiles[k] = np
+			m.mu.Lock()
+			j.VideoFiles = appendUnique(j.VideoFiles, np)
+			m.mu.Unlock()
+		}
 	}
 	// Real sizes of the finished files.
 	var total int64

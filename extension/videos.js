@@ -163,7 +163,9 @@ function classify(details) {
 async function hlsIsVariant(url) {
   try {
     const r = await fetchTimeout(url, { credentials: "include" }, 5000);
-    if (!r.ok) return { variant: false, children: [], encrypted: false };
+    // Many video servers refuse the extension's own request (their check
+    // wants the player's Referer): then guess from the addresses.
+    if (!r.ok) return { variant: false, children: [], encrypted: false, failed: true };
     let text = (await r.text()).slice(0, 200000);
     const at = text.indexOf("#EXTM3U");
     if (at < 0) return { variant: false, children: [], encrypted: looksEncrypted(text) };
@@ -171,8 +173,17 @@ async function hlsIsVariant(url) {
     if (/#EXT-X-STREAM-INF/i.test(text)) return { variant: false, children: hlsChildren(url, text), encrypted: false };
     return { variant: /#EXTINF/i.test(text), children: [], encrypted: false };
   } catch (e) {
-    return { variant: false, children: [], encrypted: false };
+    return { variant: false, children: [], encrypted: false, failed: true };
   }
+}
+
+// The folder of a link ("https://cdn/x/y/" for https://cdn/x/y/index.m3u8?t=1).
+function folderOf(u) {
+  try { const x = new URL(u); return x.origin + x.pathname.replace(/[^/]*$/, ""); } catch (e) { return ""; }
+}
+
+function isMasterName(u) {
+  try { return /(^|\/)master[^/]*\.m3u8$/i.test(new URL(u).pathname); } catch (e) { return false; }
 }
 
 // Base64 text or binary data instead of a playlist.
@@ -237,6 +248,20 @@ async function onMediaResponse(details) {
   if (kind === "hls") {
     if ((t.hlsChildren || []).includes(details.url)) return; // a quality of a listed master
     const r = await hlsIsVariant(details.url);
+    if (r.failed) {
+      // The playlist could not be read here. A "master" playlist is listed and
+      // replaces the playlists in its folder; any other playlist in the folder
+      // of a listed master is one of its qualities or audio tracks.
+      const folder = folderOf(details.url);
+      if (isMasterName(details.url)) {
+        for (const x of [...t.list]) {
+          if (x.kind === "hls" && x.url !== details.url && folder && x.url.startsWith(folder)) removeVideo(details.tabId, x.url);
+        }
+        r.variant = false;
+      } else if (t.list.some((x) => x.kind === "hls" && x.master && folder.startsWith(folderOf(x.url)))) {
+        return;
+      }
+    }
     if (r.children.length) {
       t.hlsChildren = [...new Set([...(t.hlsChildren || []), ...r.children])].slice(-200);
       for (const c of r.children) removeVideo(details.tabId, c);
@@ -283,6 +308,9 @@ async function sendVideo(url, tab, title) {
   }
   const referer = v && isWebUrl(v.frame) ? v.frame : tabUrl;
   const req = {
+    // 1.4.2: the player frame and the tab's page, so BDDM can try the other
+    // Referers when the video server refuses the first one (HTTP 403).
+    frame: v && isWebUrl(v.frame) ? v.frame : "", page: tabUrl,
     // A video file itself ("file") goes to BDDM's fast engine, not yt-dlp.
     url, referer, kind: v && v.kind === "file" ? "media" : "video", title: title || (tab && tab.title) || "",
     stream: v && (v.kind === "hls" || v.kind === "dash") ? v.kind : "",

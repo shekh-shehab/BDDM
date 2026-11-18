@@ -207,22 +207,51 @@ func captured(h map[string]string, name string) string {
 	return ""
 }
 
-// betterReferer: the extension's referer, or the one the browser really
-// sent when ours is only an origin ("https://site.com/").
-func betterReferer(ref string, hdrs map[string]string) string {
-	real := captured(hdrs, "Referer")
-	if real == "" {
-		return ref
-	}
-	if ref == "" {
+// betterReferer picks the Referer for target (1.4.2):
+//  1. the Referer the browser really sent for this link, when the
+//     extension saw it (it is what the site's own player sends);
+//  2. for a stream (stream=true), what the browser sends by default
+//     ("strict-origin-when-cross-origin"): only the site, e.g.
+//     "https://megaplay.buzz/", when the player frame is on another site
+//     than the stream; the full address on the same site;
+//  3. otherwise the extension's referer as it is.
+func betterReferer(ref, target string, hdrs map[string]string, stream bool) string {
+	if real := strings.TrimSpace(captured(hdrs, "Referer")); isWebLink(real) {
 		return real
 	}
-	if u, err := url.Parse(ref); err == nil && (u.Path == "" || u.Path == "/") && u.RawQuery == "" {
-		if r, err := url.Parse(real); err == nil && r.Host == u.Host {
-			return real
-		}
+	if stream && ref != "" && target != "" {
+		return policyReferer(ref, target)
 	}
 	return ref
+}
+
+// isWebLink: an http(s) link with a host.
+func isWebLink(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
+}
+
+// policyReferer: the Referer a browser sends by default when the page
+// "from" loads "target": the full address (without #fragment) on the same
+// origin, only "scheme://host/" on another origin, nothing from https to
+// http.
+func policyReferer(from, target string) string {
+	f, err := url.Parse(strings.TrimSpace(from))
+	if err != nil || (f.Scheme != "http" && f.Scheme != "https") || f.Host == "" {
+		return from
+	}
+	t, err := url.Parse(strings.TrimSpace(target))
+	if err != nil || t.Host == "" {
+		return from
+	}
+	f.Fragment, f.RawFragment, f.User = "", "", nil
+	if strings.EqualFold(f.Scheme, t.Scheme) && strings.EqualFold(f.Host, t.Host) {
+		return f.String()
+	}
+	if f.Scheme == "https" && t.Scheme == "http" {
+		return ""
+	}
+	return f.Scheme + "://" + f.Host + "/"
 }
 
 // applyBrowser copies the browser details of r into j (j is new or locked).
@@ -237,8 +266,12 @@ func (j *Job) applyBrowser(r AddRequest) {
 	if lang := cleanValue(firstNonEmpty(captured(hdrs, "Accept-Language"), r.AcceptLanguage), 512); lang != "" {
 		j.Lang = lang
 	}
-	if ref := betterReferer(j.Referer, hdrs); ref != j.Referer && cleanValue(ref, 8<<10) != "" {
+	stream := streamKind(r.Stream) != "" || isStreamURL(r.URL)
+	if ref := betterReferer(j.Referer, r.URL, hdrs, stream); ref != j.Referer && cleanValue(ref, 8<<10) != "" {
 		j.Referer = ref
+	}
+	if stream {
+		j.RefAlts = refererAlternatives(j.Referer, r.URL, firstNonEmpty(r.Frame, r.Referer), r.Page)
 	}
 	if c := cleanValue(captured(hdrs, "Cookie"), maxCookieHdrSize); c != "" && j.Cookie == "" {
 		j.Cookie = c

@@ -188,6 +188,14 @@ type Job struct {
 	// UA / Lang: the browser's User-Agent and Accept-Language (1.4.1).
 	UA   string `json:"ua,omitempty"`
 	Lang string `json:"lang,omitempty"`
+	// PageTitle: the title of the page the link came from (1.4.2), for a
+	// file name when the link's own name says nothing ("video.mp4").
+	PageTitle string `json:"pageTitle,omitempty"`
+	// TSFix: the stream's pieces are video data hidden behind a fake image
+	// header, so ffmpeg is told to read them as MPEG-TS (disguise.go).
+	TSFix bool `json:"tsFix,omitempty"`
+	// RefAlts: other Referers to try when the site answers 403 (referer.go).
+	RefAlts []string `json:"refAlts,omitempty"`
 
 	// Runtime only.
 	// extra / jar: headers the browser sent for the link and the cookies of
@@ -201,6 +209,9 @@ type Job struct {
 	pend       *pendingInfo  // set while Status is Pending
 	vpend      *videoPending // set while a video waits for its options window
 	localPL    string        // cleaned local copy of the playlist (FixPlaylist)
+	refFrame   string        // stream: the player frame's address (referer.go)
+	refPage    string        // stream: the tab's page (referer.go)
+	refTried   map[string]bool
 	done       atomic.Int64
 	cancel     context.CancelFunc
 	finished   chan struct{}
@@ -331,6 +342,10 @@ type AddRequest struct {
 	AcceptLanguage string            `json:"acceptLanguage,omitempty"`
 	Headers        map[string]string `json:"headers,omitempty"`
 	Cookies        []hostCookie      `json:"cookies,omitempty"`
+	// 1.4.2: for a stream, the full address of the player frame that
+	// loaded it and the tab's page (other Referers to try after a 403).
+	Frame string `json:"frame,omitempty"`
+	Page  string `json:"page,omitempty"`
 }
 
 // DuplicateError is returned by Add when the URL was already downloaded.
@@ -360,6 +375,7 @@ func NewManager(configDir string, notify func(title, body string)) (*Manager, er
 	}
 	m := &Manager{configDir: configDir, client: newClient(), settings: defaultSettings(), notify: notify}
 	go removeOldCookieFiles()
+	refMem.setDir(configDir)
 	driveSampleDir = filepath.Join(configDir, "drive-pages")
 	m.tools = newTools(configDir, m.client)
 

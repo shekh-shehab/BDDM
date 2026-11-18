@@ -307,18 +307,30 @@ func TestDirectMediaUsesEngine(t *testing.T) {
 	}
 }
 
-// Fix 8 (BDDM side): an origin-only referer is replaced by the full one
-// the browser sent.
+// 1.4.2: the Referer the browser really sent wins; without it a stream
+// gets what the browser sends by default (only the site for another site).
 func TestBetterReferer(t *testing.T) {
 	h := map[string]string{"Referer": "https://site.example/watch/123?t=4"}
-	if got := betterReferer("https://site.example/", h); got != "https://site.example/watch/123?t=4" {
+	if got := betterReferer("https://site.example/", "https://cdn.example/a.mp4", h, false); got != "https://site.example/watch/123?t=4" {
 		t.Fatalf("got %q", got)
 	}
-	if got := betterReferer("https://site.example/page", h); got != "https://site.example/page" {
-		t.Fatalf("a full referer was replaced: %q", got)
+	real := map[string]string{"referer": "https://megaplay.buzz/"}
+	frame := "https://megaplay.buzz/stream/s-2/810433/sub?s=tcdn"
+	stream := "https://megap.shiora.top/2d0a/798a/master.m3u8"
+	if got := betterReferer(frame, stream, real, true); got != "https://megaplay.buzz/" {
+		t.Fatalf("the browser's real referer was not used: %q", got)
 	}
-	if got := betterReferer("https://other.example/", h); got != "https://other.example/" {
-		t.Fatalf("another site's referer was used: %q", got)
+	if got := betterReferer(frame, stream, nil, true); got != "https://megaplay.buzz/" {
+		t.Fatalf("cross-site stream without a captured referer: %q", got)
+	}
+	if got := betterReferer("https://megaplay.buzz/p#x", "https://megaplay.buzz/a.m3u8", nil, true); got != "https://megaplay.buzz/p" {
+		t.Fatalf("same-site stream: %q", got)
+	}
+	if got := betterReferer("https://site.example/page", "https://cdn.example/f.zip", nil, false); got != "https://site.example/page" {
+		t.Fatalf("a file download's referer changed: %q", got)
+	}
+	if got := policyReferer("https://a.example/x", "http://b.example/y"); got != "" {
+		t.Fatalf("https -> http should send no referer, got %q", got)
 	}
 }
 
