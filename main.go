@@ -27,8 +27,8 @@ import (
 
 const port = "9614"
 
-// appVersion is the BDDM version (the extension has the same number).
-const appVersion = "1.4.2"
+// appVersion is the BDDM version shown in Settings and on the update notice.
+const appVersion = "1.4.3"
 
 func main() {
 	noWindow := flag.Bool("nowindow", false, "do not open the window (run in the background)")
@@ -73,12 +73,19 @@ func main() {
 
 	go m.tools.AutoUpdate() // keep yt-dlp fresh (at most once a day)
 
+	upd := newUpdater(appVersion,
+		func() bool { return m.Settings().CheckUpdates },
+		func() bool { return m.Settings().Notifications },
+		notify)
+	upd.Start()
+
 	srv := &http.Server{ReadHeaderTimeout: 10 * time.Second}
 	stopped := make(chan struct{})
 	var once sync.Once
 	quit := func() {
 		once.Do(func() {
 			log.Print("Stopping: pausing downloads and saving...")
+			upd.Stop()
 			m.Shutdown()
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
@@ -86,7 +93,7 @@ func main() {
 			close(stopped)
 		})
 	}
-	srv.Handler = newServer(m, port, quit)
+	srv.Handler = newServer(m, port, quit, upd)
 
 	// Ctrl+C in the terminal also stops cleanly.
 	sig := make(chan os.Signal, 1)

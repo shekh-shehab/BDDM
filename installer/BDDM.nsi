@@ -11,7 +11,7 @@ Target amd64-unicode
 !include "LogicLib.nsh"
 
 !ifndef VERSION
-  !define VERSION "1.4.2"
+  !define VERSION "1.4.3"
 !endif
 !define APP "BDDM"
 !define APPNAME "BDDM Download Manager"

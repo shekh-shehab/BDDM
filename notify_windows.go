@@ -102,6 +102,15 @@ try {
 	}
 }
 
+// openURL opens an http(s) address in the default browser.
+func openURL(raw string) error {
+	if err := validWebURL(raw); err != nil {
+		return err
+	}
+	cmd := exec.Command("rundll32", "url.dll,FileProtocolHandler", raw)
+	return cmd.Start()
+}
+
 // openFolder opens Explorer at dir, selecting file when given.
 func openFolder(dir, file string) error {
 	var cmd *exec.Cmd

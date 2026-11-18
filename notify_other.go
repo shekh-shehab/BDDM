@@ -43,6 +43,17 @@ func escapeAS(s string) string {
 	return string(out)
 }
 
+// openURL opens an http(s) address in the default browser.
+func openURL(raw string) error {
+	if err := validWebURL(raw); err != nil {
+		return err
+	}
+	if runtime.GOOS == "darwin" {
+		return exec.Command("open", raw).Start()
+	}
+	return exec.Command("xdg-open", raw).Start()
+}
+
 // openFolder opens dir in the file manager (file is selected on Windows only).
 func openFolder(dir, file string) error {
 	opener := "xdg-open"

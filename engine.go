@@ -94,6 +94,10 @@ type Settings struct {
 	// ResumeOnStart: downloads that were running when BDDM closed (or the
 	// computer crashed) continue when BDDM starts again.
 	ResumeOnStart bool `json:"resumeOnStart"`
+	// CheckUpdates: look for a new GitHub release when BDDM starts and
+	// about every 6 hours. On by default. A notice is shown; nothing is
+	// installed automatically.
+	CheckUpdates bool `json:"checkUpdates"`
 }
 
 func defaultSettings() Settings {
@@ -102,7 +106,7 @@ func defaultSettings() Settings {
 		dir = filepath.Join(home, "Downloads", "BDDM")
 	}
 	return Settings{DownloadDir: dir, Parts: defaultParts, MaxActive: defaultMaxActive, Notifications: true, AskCaptured: true,
-		Categories: defaultCategories(), ResumeOnStart: true}
+		Categories: defaultCategories(), ResumeOnStart: true, CheckUpdates: true}
 }
 
 func (s *Settings) fix() {

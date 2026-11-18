@@ -117,6 +117,9 @@
   .toast .times { color: var(--muted); font-weight: 400; margin-left: 6px; }
   #offline { display: none; background: #450a0a; color: #fecaca; padding: 8px 20px; text-align: center; }
   #offline.show { display: block; }
+  #updateBanner { display: none; align-items: center; justify-content: center; gap: 16px; flex-wrap: wrap; background: #172554; color: #93c5fd; padding: 8px 20px; border-bottom: 1px solid #1e3a8a; }
+  #updateBanner.show { display: flex; }
+  #updateBanner .ubtns { display: flex; gap: 8px; }
 </style>
 </head>
 <body>
@@ -134,6 +137,13 @@
   <button id="quitBtn" class="danger" title="Pause all downloads and close BDDM">Quit</button>
 </header>
 <div id="offline">BDDM is not running. Start it again to continue.</div>
+<div id="updateBanner">
+  <span id="updateText">A new version of BDDM is available</span>
+  <div class="ubtns">
+    <button id="updateView" class="small primary">View release</button>
+    <button id="updateLater" class="small">Later</button>
+  </div>
+</div>
 
 <main>
   <section id="tab-downloads">
@@ -187,6 +197,10 @@
         <input id="setAutostart" type="checkbox"><label for="setAutostart" style="margin:0">Start BDDM with Windows</label>
       </div>
       <div class="hint" style="margin:-10px 0 16px">BDDM starts in the background when you sign in to Windows, so the browser extension always finds it.</div>
+      <div class="field check">
+        <input id="setCheckUpdates" type="checkbox"><label for="setCheckUpdates" style="margin:0">Check for updates automatically</label>
+      </div>
+      <div class="hint" style="margin:-10px 0 16px">BDDM looks for a new version on GitHub when it starts and about every 6 hours. It only shows a notice; it does not install anything by itself.</div>
       <button id="saveSettings" class="primary">Save settings</button>
     </div>
     <div class="card" style="margin-top:16px">
@@ -198,6 +212,10 @@
       <button id="saveCats" class="primary" style="margin-top:8px">Save folders</button>
     </div>
     <div class="hint" id="appVersion" style="margin-top:12px;text-align:center"></div>
+    <div style="text-align:center;margin-top:8px">
+      <button id="checkUpdatesBtn" class="small">Check for updates</button>
+      <div id="updateStatus" class="hint" style="margin-top:6px"></div>
+    </div>
     <div class="card" style="margin-top:16px">
       <div class="field" style="margin-bottom:8px">
         <label>Video tools</label>
@@ -725,6 +743,7 @@ async function loadSettings() {
   $("setCookies").value = s.cookiesBrowser || "";
   $("setAutostart").checked = !!s.startWithWindows;
   $("setResume").checked = !!s.resumeOnStart;
+  $("setCheckUpdates").checked = s.checkUpdates !== false;
   renderCats(s.categories || [], s.downloadDir);
   api("/api/ping").then((p) => { $("appVersion").textContent = "BDDM version " + (p.version || ""); }).catch(() => {});
 }
@@ -787,6 +806,7 @@ $("saveSettings").onclick = async () => {
       maxActive: parseInt($("setActive").value, 10) || 3, notifications: $("setNotify").checked,
       askCaptured: $("setAsk").checked, cookiesBrowser: $("setCookies").value,
       startWithWindows: $("setAutostart").checked, resumeOnStart: $("setResume").checked,
+      checkUpdates: $("setCheckUpdates").checked,
     });
     $("setDir").value = s.downloadDir; $("setParts").value = s.parts; $("setActive").value = s.maxActive;
     toast("Settings saved", "New downloads will use these settings.", "ok");
@@ -799,6 +819,33 @@ $("setCookies").onchange = async () => {
   } catch (e) { toast("Could not save settings", e.message, "bad"); }
 };
 $("openDir").onclick = () => api("/api/openfolder", {}).catch((e) => toast("Could not open folder", e.message, "bad"));
+
+
+// ---------- updates ----------
+async function refreshUpdate() {
+  try {
+    const u = await api("/api/update");
+    const show = !!u.available;
+    $("updateBanner").classList.toggle("show", show);
+    if (show) $("updateText").textContent = "BDDM v" + u.version + " is available";
+    if (u.checking) $("updateStatus").textContent = "Checking...";
+    else $("updateStatus").textContent = u.message || "";
+  } catch (e) {}
+}
+$("updateView").onclick = () => api("/api/update/open", {}).catch((e) => toast("Could not open the release page", e.message, "bad"));
+$("updateLater").onclick = async () => {
+  try { await api("/api/update/dismiss", {}); } catch (e) {}
+  $("updateBanner").classList.remove("show");
+};
+$("checkUpdatesBtn").onclick = async () => {
+  $("updateStatus").textContent = "Checking...";
+  $("checkUpdatesBtn").disabled = true;
+  try { await api("/api/update/check", {}); } catch (e) { $("updateStatus").textContent = "Could not check right now."; }
+  $("checkUpdatesBtn").disabled = false;
+  refreshUpdate();
+};
+setInterval(refreshUpdate, 2000);
+refreshUpdate();
 
 // ---------- quit ----------
 $("quitBtn").onclick = async () => {

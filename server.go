@@ -27,10 +27,11 @@ type server struct {
 	m    *Manager
 	quit func()
 	port string
+	upd  *Updater
 }
 
-func newServer(m *Manager, port string, quit func()) http.Handler {
-	s := &server{m: m, quit: quit, port: port}
+func newServer(m *Manager, port string, quit func(), upd *Updater) http.Handler {
+	s := &server{m: m, quit: quit, port: port, upd: upd}
 	mux := http.NewServeMux()
 
 	ui, _ := fs.Sub(uiFiles, "ui")
@@ -335,6 +336,34 @@ func newServer(m *Manager, port string, quit func()) http.Handler {
 	})
 	mux.HandleFunc("POST /api/openfolder", func(w http.ResponseWriter, r *http.Request) {
 		reply(w, openFolder(m.Settings().DownloadDir, ""))
+	})
+	mux.HandleFunc("GET /api/update", func(w http.ResponseWriter, r *http.Request) {
+		if s.upd == nil {
+			writeJSON(w, 200, UpdateStatus{Current: appVersion})
+			return
+		}
+		writeJSON(w, 200, s.upd.Status())
+	})
+	mux.HandleFunc("POST /api/update/check", func(w http.ResponseWriter, r *http.Request) {
+		if s.upd == nil {
+			writeJSON(w, 200, UpdateStatus{Current: appVersion, Message: "Could not check right now."})
+			return
+		}
+		writeJSON(w, 200, s.upd.Check(true))
+	})
+	mux.HandleFunc("POST /api/update/dismiss", func(w http.ResponseWriter, r *http.Request) {
+		if s.upd == nil {
+			writeJSON(w, 200, UpdateStatus{Current: appVersion})
+			return
+		}
+		writeJSON(w, 200, s.upd.Dismiss())
+	})
+	mux.HandleFunc("POST /api/update/open", func(w http.ResponseWriter, r *http.Request) {
+		if s.upd == nil {
+			reply(w, errors.New("no release to open"))
+			return
+		}
+		reply(w, s.upd.OpenRelease())
 	})
 	mux.HandleFunc("POST /api/quit", func(w http.ResponseWriter, r *http.Request) {
 		reply(w, nil)
