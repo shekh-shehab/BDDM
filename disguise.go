@@ -148,6 +148,7 @@ func (m *Manager) lookAtHLS(ctx context.Context, j *Job) (*hlsLook, error) {
 	raw := j.URL
 	m.mu.Unlock()
 	status, body, err := m.fetchPlaylist(ctx, j, raw)
+	status = playlistStatus(status, body)
 	if err == nil && (status == 401 || status == 403) {
 		status, body, err = m.playlistWithOtherReferers(ctx, j, raw, status, body)
 	}
@@ -212,6 +213,9 @@ func (m *Manager) pieceHidden(ctx context.Context, j *Job, raw string) bool {
 		return false
 	}
 	req.Header.Set("Range", "bytes=0-16383")
+	if o := originOf(h.Referer); o != "" && req.Header.Get("Origin") == "" {
+		req.Header.Set("Origin", o) // like the player's request
+	}
 	resp, err := m.client.Do(req)
 	if err != nil {
 		return false
@@ -236,7 +240,7 @@ func (m *Manager) playlistWithOtherReferers(ctx context.Context, j *Job, raw str
 		j.Referer = ref
 		m.mu.Unlock()
 		st, b, err := m.fetchPlaylist(ctx, j, raw)
-		if err == nil && st < 400 {
+		if err == nil && playlistStatus(st, b) < 400 {
 			m.mu.Lock()
 			j.RefAlts = otherReferers(alts, ref, orig)
 			m.mu.Unlock()
@@ -247,6 +251,16 @@ func (m *Manager) playlistWithOtherReferers(ctx context.Context, j *Job, raw str
 	j.Referer = orig
 	m.mu.Unlock()
 	return status, body, nil
+}
+
+// playlistStatus: a playlist that is only "#EXT-X-ERROR:forbidden" (some
+// servers send it with 200) counts as a refusal (403).
+func playlistStatus(status int, body []byte) int {
+	if status < 400 && bytes.Contains(body, []byte("#EXT-X-ERROR")) &&
+		!bytes.Contains(body, []byte("#EXTINF")) && !bytes.Contains(body, []byte("#EXT-X-STREAM-INF")) {
+		return http.StatusForbidden
+	}
+	return status
 }
 
 // otherReferers: alts without picked, with the old Referer first.

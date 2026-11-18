@@ -13,6 +13,33 @@
   }, true);
 })();
 
+// 1.4.2: read the start of a playlist the way this page (or player frame)
+// would: the request carries the frame's Origin and Referer, which many
+// video servers check (403 "#EXT-X-ERROR:forbidden" otherwise). Only the
+// first 64 KB of text is returned, and only for links the page itself
+// loaded (the background checks that).
+(() => {
+  try {
+    api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+      if (!msg || msg.type !== "peekPlaylist" || sender.id !== api.runtime.id || !/^https?:\/\//i.test(msg.url || "")) return false;
+      // Firefox: content.fetch is the page's own fetch (its Origin/Referer).
+      const doFetch = (typeof content !== "undefined" && content && content.fetch) ? content.fetch.bind(content) : fetch;
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 6000);
+      doFetch(msg.url, { credentials: "include", signal: ctrl.signal, cache: "no-store" })
+        .then(async (r) => {
+          const text = (await r.text()).slice(0, 65536);
+          sendResponse({ ok: true, status: r.status, text });
+        })
+        .catch((e) => sendResponse({ ok: false, error: String(e && e.message || e) }))
+        .finally(() => clearTimeout(timer));
+      return true;
+    });
+  } catch (err) {
+    // The extension was reloaded; nothing to do.
+  }
+})();
+
 // Google Drive: Drive draws its own right-click menu, and its file list has no
 // real links. Remember which file(s) the user right-clicked (Drive list and
 // grid items carry data-id="<file or folder id>"), so "Download with BDDM"

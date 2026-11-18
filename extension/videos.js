@@ -139,12 +139,31 @@ function headerOf(details, name) {
   return h ? String(h.value || "") : "";
 }
 
+// Playlists in disguise (1.4.2, e.g. movielink): no ".m3u8" in the address
+// and sent as a picture or plain data. Worth a look at the content when the
+// player itself asked for it (XHR/fetch, not an <img>) and it is either at
+// a playlist-like address ("/m/...", "/hls/...") or small.
+const MAYBE_HLS_PATH_RE = /\/(m|hls|playlist|manifest)\//i;
+const MAYBE_HLS_TYPES = /^(image\/|text\/plain$|application\/octet-stream$|binary\/octet-stream$|$)/;
+const MAYBE_HLS_MAX = 512 * 1024;
+
+function maybeHidden(details, path, ct) {
+  if (details.type !== "xmlhttprequest" && details.type !== "other") return false;
+  if (!MAYBE_HLS_TYPES.test(ct)) return false;
+  if (/\.(ts|m4s|mp4|m4a|aac|vtt|webvtt|key|js|css|json|html?|woff2?)(\?|$)/i.test(path)) return false;
+  const len = parseInt(headerOf(details, "content-length") || "-1", 10);
+  if (len > MAYBE_HLS_MAX) return false;
+  if (MAYBE_HLS_PATH_RE.test(path)) return true;
+  return ct.startsWith("image/") && len >= 0 && len <= 64 * 1024 && !/\.(png|jpe?g|gif|webp|svg|ico|avif|bmp)(\?|$)/i.test(path);
+}
+
 function classify(details) {
   const u = details.url;
   let path = "";
   try { path = new URL(u).pathname.toLowerCase(); } catch (e) { return ""; }
   const ct = headerOf(details, "content-type").toLowerCase().split(";")[0].trim();
   if (path.endsWith(".m3u8") || ct === "application/vnd.apple.mpegurl" || ct === "application/x-mpegurl" || ct === "audio/mpegurl") return "hls";
+  if (maybeHidden(details, path, ct)) return "maybe-hls";
   if (path.endsWith(".mpd") || ct === "application/dash+xml") return "dash";
   if (ct.startsWith("video/") && ct !== "video/mp2t" && ct !== "video/iso.segment" && !SEGMENT_RE.test(u)) {
     let size = -1;
@@ -160,13 +179,64 @@ function classify(details) {
 // the master is worth listing (BDDM offers all its qualities).
 // Some sites put extra bytes before "#EXTM3U", and some encrypt the whole
 // playlist (then it has no "#EXTM3U" at all and is marked "encrypted").
-async function hlsIsVariant(url) {
+// peekPlaylist reads the start of a playlist. First from the frame that
+// loaded it (content.js: the request then has the player's Origin and
+// Referer, which servers like movielink's check), then from here.
+// Our own looks (made from the page, so the browser reports them like the
+// page's requests): remembered so they are not looked at again (a loop),
+// and their answers are kept for a minute.
+const ownPeeks = new Map(); // url -> {at, result}
+const PEEK_TTL = 60000;
+
+function ownPeek(url) {
+  const p = ownPeeks.get(url);
+  return p && Date.now() - p.at < PEEK_TTL ? p : null;
+}
+
+async function peekPlaylist(url, details) {
+  const known = ownPeek(url);
+  if (known) return known.result || { ok: false, text: "" };
+  const entry = { at: Date.now(), result: null };
+  ownPeeks.set(url, entry);
+  while (ownPeeks.size > 300) ownPeeks.delete(ownPeeks.keys().next().value);
+  entry.result = await peekPlaylistNow(url, details);
+  entry.at = Date.now();
+  return entry.result;
+}
+
+async function peekPlaylistNow(url, details) {
+  if (details && details.tabId >= 0) {
+    try {
+      const r = await Promise.race([
+        api.tabs.sendMessage(details.tabId, { type: "peekPlaylist", url }, { frameId: details.frameId || 0 }),
+        new Promise((res) => setTimeout(() => res(null), 7000)),
+      ]);
+      if (r && r.ok && r.status < 400) return { ok: true, text: String(r.text || "") };
+    } catch (e) { /* no content script in that frame */ }
+  }
   try {
     const r = await fetchTimeout(url, { credentials: "include" }, 5000);
+    if (!r.ok) return { ok: false, text: "" };
+    return { ok: true, text: (await r.text()).slice(0, 200000) };
+  } catch (e) {
+    return { ok: false, text: "" };
+  }
+}
+
+// Cuts anything before "#EXTM3U" (some sites add bytes); "" when the text
+// is no playlist.
+function playlistText(text) {
+  const at = String(text || "").indexOf("#EXTM3U");
+  return at < 0 || at > 4096 ? "" : text.slice(at);
+}
+
+async function hlsIsVariant(url, details, pre) {
+  try {
+    const r = pre || await peekPlaylist(url, details);
     // Many video servers refuse the extension's own request (their check
     // wants the player's Referer): then guess from the addresses.
     if (!r.ok) return { variant: false, children: [], encrypted: false, failed: true };
-    let text = (await r.text()).slice(0, 200000);
+    let text = r.text;
     const at = text.indexOf("#EXTM3U");
     if (at < 0) return { variant: false, children: [], encrypted: looksEncrypted(text) };
     text = text.slice(at);
@@ -216,6 +286,9 @@ function hlsChildren(base, text) {
   const out = [];
   for (const line of text.split(/\r?\n/)) {
     const s = line.trim();
+    // Audio and subtitle playlists of the master: #EXT-X-MEDIA:...URI="..."
+    const m = /^#EXT-X-(MEDIA|I-FRAME-STREAM-INF):.*URI="([^"]+)"/i.exec(s);
+    if (m) { try { out.push(new URL(m[2], base).href); } catch (e) { /* skip */ } continue; }
     if (!s || s.startsWith("#")) continue;
     try { out.push(new URL(s, base).href); } catch (e) { /* skip */ }
   }
@@ -224,6 +297,7 @@ function hlsChildren(base, text) {
 
 async function onMediaResponse(details) {
   if (details.tabId < 0 || details.statusCode >= 400) return;
+  if (ownPeek(details.url)) return; // our own look at it (peekPlaylist)
   if (details.type === "sub_frame") {
     // A YouTube/Vimeo/... player embedded in another page.
     if (!videoPageInfo(details.url)) return;
@@ -233,7 +307,7 @@ async function onMediaResponse(details) {
     addVideo(details.tabId, tab.url, { url: details.url, kind: "embed", title: tab.title || "", label: "Embedded player" });
     return;
   }
-  const kind = classify(details);
+  let kind = classify(details);
   if (!kind) return;
   let host = "";
   try { host = new URL(details.url).hostname.toLowerCase(); } catch (e) { return; }
@@ -246,9 +320,25 @@ async function onMediaResponse(details) {
   if (PAGE_ONLY_HOSTS.test(hostOf(tab.url)) && videoPageInfo(tab.url)) return;
   if (isBrowserOnly(details.url, tab.url)) return; // Send Anywhere: one-time links
   if (t.list.some((x) => x.url === details.url)) return;
+  if (kind === "maybe-hls") {
+    // Look at the content once per address; give up on a folder after
+    // three answers that are not playlists (its pieces, real pictures).
+    if ((t.hlsChildren || []).includes(details.url)) return;
+    const folder = folderOf(details.url);
+    t.notHls = t.notHls || {};
+    t.peeks = (t.peeks || 0) + 1;
+    if ((t.notHls[folder] || 0) >= 3 || t.peeks > 60) return;
+    const r = await peekPlaylist(details.url, details);
+    if (!r.ok || !playlistText(r.text)) {
+      t.notHls[folder] = (t.notHls[folder] || 0) + 1;
+      return;
+    }
+    kind = "hls";
+    details = Object.assign({}, details, { peeked: r });
+  }
   if (kind === "hls") {
     if ((t.hlsChildren || []).includes(details.url)) return; // a quality of a listed master
-    const r = await hlsIsVariant(details.url);
+    const r = await hlsIsVariant(details.url, details, details.peeked);
     if (r.failed) {
       // The playlist could not be read here. A "master" playlist is listed and
       // replaces the playlists in its folder; any other playlist in the folder
