@@ -594,7 +594,7 @@ func (m *Manager) Add(r AddRequest) (JobView, error) {
 		ID: newID(), URL: r.URL, Referer: strings.TrimSpace(r.Referer), Cookie: strings.TrimSpace(r.Cookie),
 		Want: want, Dir: m.settings.dirFor(firstNonEmpty(want, filenameFromURL(r.URL))), Parts: m.settings.Parts,
 		Status: StatusQueued, Started: time.Now(), AutoDir: true,
-		Mirrors: cleanMirrors(r.URL, r.Mirrors), Hash: sum,
+		Mirrors: cleanMirrors(r.URL, r.Mirrors), Hash: sum, PageTitle: cleanValue(strings.TrimSpace(r.Title), 1024),
 	}
 	j.applyBrowser(r)
 	m.jobs = append(m.jobs, j)
@@ -1211,9 +1211,15 @@ func (m *Manager) runJob(ctx context.Context, j *Job) error {
 	}
 	if name == "" {
 		base := j.Want
-		if base == "" {
-			base = info.Filename
+		if base == "" || (uselessName(base) && info.Filename != "" && !uselessName(info.Filename)) {
+			// The server's name is better than a "video.mp4" from the browser.
+			if base != "" && path.Ext(info.Filename) == "" {
+				info.Filename += path.Ext(base)
+			}
+			base = firstNonEmpty(info.Filename, base)
 		}
+		// A link with no useful name ("stream.mp4"): the page's title (names.go).
+		base = nameWithTitle(base, j.PageTitle)
 		if base == "" {
 			base = "download.bin"
 		}

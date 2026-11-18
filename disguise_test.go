@@ -252,7 +252,7 @@ func TestMegaplayLikeStream(t *testing.T) {
 	if d := videoSeconds(t, p); d < 5 {
 		t.Fatalf("video is %.1f s", d)
 	}
-	if !strings.HasPrefix(done.Name, "Tokyo Revengers Episode 1") {
+	if done.Name != "Tokyo Revengers Episode 1.mp4" { // the page title, cleaned (names.go)
 		t.Fatalf("file name %q", done.Name)
 	}
 

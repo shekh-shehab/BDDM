@@ -314,7 +314,7 @@ func (m *Manager) StartVideo(id string, opt VideoOptions, dir string, later bool
 		j.Dir = dir
 		m.rememberDirLocked(cat, dir)
 	}
-	j.Name = sanitizeName(firstNonEmpty(title, "Video"))
+	j.Name = firstNonEmpty(cleanTitle(title), sanitizeName(title), "Video")
 	if !opt.Playlist {
 		switch opt.Quality {
 		case "mp3":
@@ -1436,7 +1436,7 @@ var cookiesBrowser atomic.Value
 // streamOutName is the file name (without extension) of a stream download:
 // the page title.
 func streamOutName(title string) string {
-	name := sanitizeName(title)
+	name := firstNonEmpty(cleanTitle(title), sanitizeName(title))
 	if len(name) > 150 {
 		name = strings.TrimSpace(strings.ToValidUTF8(name[:150], ""))
 	}

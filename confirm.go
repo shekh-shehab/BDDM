@@ -78,7 +78,11 @@ func (m *Manager) AddPending(r AddRequest) (JobView, error) {
 	j := &Job{
 		ID: newID(), URL: r.URL, Referer: strings.TrimSpace(r.Referer), Cookie: strings.TrimSpace(r.Cookie),
 		Want: sanitizeName(r.Filename), Dir: m.settings.DownloadDir, Parts: m.settings.Parts,
-		Status: StatusPending, Started: time.Now(), pend: p,
+		Status: StatusPending, Started: time.Now(), pend: p, PageTitle: cleanValue(strings.TrimSpace(r.Title), 1024),
+	}
+	if !isDrive {
+		// "stream.mp4", "download": the page's title says more (names.go).
+		p.suggest = nameWithTitle(p.suggest, j.PageTitle)
 	}
 	j.applyBrowser(r)
 	m.jobs = append(m.jobs, j)
@@ -150,8 +154,8 @@ func (m *Manager) probePending(j *Job) {
 	}
 	// A name from the server is better than a guess from the URL, unless the
 	// browser already told us the name.
-	if j.Want == "" && info.Filename != "" {
-		j.pend.suggest = sanitizeName(info.Filename)
+	if info.Filename != "" && (j.Want == "" || (uselessName(j.Want) && !uselessName(info.Filename))) {
+		j.pend.suggest = nameWithTitle(sanitizeName(info.Filename), j.PageTitle)
 	}
 }
 

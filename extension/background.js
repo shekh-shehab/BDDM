@@ -251,6 +251,20 @@ async function activeTabUrl() {
   }
 }
 
+// The title of the page a download came from (1.4.2): BDDM names a file
+// after it when the link has no useful name ("stream.mp4", "download").
+async function pageTitleFor(page, tab) {
+  if (tab && tab.title && (!page || tab.url === page)) return tab.title;
+  if (!isWebUrl(page)) return "";
+  const noHash = (u) => String(u || "").split("#")[0];
+  try {
+    const tabs = await api.tabs.query({});
+    const hit = tabs.find((t) => t.url === page) || tabs.find((t) => noHash(t.url) === noHash(page));
+    if (hit && hit.title) return hit.title;
+  } catch (e) { /* no tabs */ }
+  return tab && tab.title && hostOf(tab.url) === hostOf(page) ? tab.title : "";
+}
+
 function notify(title, message) {
   api.notifications.create({
     type: "basic",
@@ -605,7 +619,8 @@ async function capture(item) {
       !driveAuthUser(url) && driveAuthUser(referer)) {
     url = withAuthUser(url, driveAuthUser(referer));
   }
-  const req = { url, referer, cookie: await linkCookieHeader(url, { referer, storeId: item.cookieStoreId }), filename };
+  const req = { url, referer, cookie: await linkCookieHeader(url, { referer, storeId: item.cookieStoreId }), filename,
+    title: await pageTitleFor(referer) };
   await withBrowserDetails(req, [url, item.url], { referer, storeId: item.cookieStoreId });
   const info = { url, origUrl: item.url, filename };
   const res = await sendToBDDM(req);
@@ -766,7 +781,8 @@ async function driveMenuTargets(info, tab) {
 
 async function sendLinkFromMenu(url, referer, tab) {
   const req = { url, referer: isWebUrl(referer) ? referer : "",
-    cookie: await linkCookieHeader(url, { referer, storeId: tab && tab.cookieStoreId }), filename: "" };
+    cookie: await linkCookieHeader(url, { referer, storeId: tab && tab.cookieStoreId }), filename: "",
+    title: await pageTitleFor(referer, tab) };
   await withBrowserDetails(req, [url], { referer, storeId: tab && tab.cookieStoreId });
   const track_info = { url, origUrl: url, filename: "" };
   const res = await sendToBDDM(req);
