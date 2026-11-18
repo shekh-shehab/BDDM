@@ -147,7 +147,7 @@ func (m *Manager) RefreshLink(req AddRequest, name string, size int64) *JobView 
 	}
 	wantSize := j.Size
 	m.mu.Unlock()
-	if size <= 0 && wantSize > 0 {
+	if size <= 0 && wantSize > 0 && !isOneShot(req.URL, req.Referer) {
 		// Quick look at the new link: a file of another size is another file.
 		ctx, cancel := context.WithTimeout(context.Background(), 2500*time.Millisecond)
 		info, err := probe(ctx, m.client, req.URL, requestHeaders(req))

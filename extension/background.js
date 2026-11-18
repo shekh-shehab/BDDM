@@ -265,6 +265,13 @@ async function pageTitleFor(page, tab) {
   return tab && tab.title && hostOf(tab.url) === hostOf(page) ? tab.title : "";
 }
 
+// Send Anywhere (1.4.2): its download links work once (the transfer ends
+// when they are read), so they are always left to the browser.
+const BROWSER_ONLY_HOSTS = ["send-anywhere.com", "sendanywhe.re", "send-anywhere.net"];
+function isBrowserOnly(...links) {
+  return links.some((u) => isExcluded(hostOf(u), BROWSER_ONLY_HOSTS));
+}
+
 function notify(title, message) {
   api.notifications.create({
     type: "basic",
@@ -604,6 +611,7 @@ async function capture(item) {
   if (await wasHandedBack([item.url, url])) return false;
 
   const referer = isWebUrl(item.referrer) ? item.referrer : await activeTabUrl();
+  if (isBrowserOnly(url, item.url, referer, item.finalUrl)) return false;
   if (isExcluded(hostOf(url), settings.excluded) || isExcluded(hostOf(item.url), settings.excluded) ||
       isExcluded(hostOf(referer), settings.excluded)) return false;
 

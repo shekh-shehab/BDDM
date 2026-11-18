@@ -244,6 +244,7 @@ async function onMediaResponse(details) {
   if (!tab || !isWebUrl(tab.url)) return;
   const t = entryFor(details.tabId, tab.url);
   if (PAGE_ONLY_HOSTS.test(hostOf(tab.url)) && videoPageInfo(tab.url)) return;
+  if (isBrowserOnly(details.url, tab.url)) return; // Send Anywhere: one-time links
   if (t.list.some((x) => x.url === details.url)) return;
   if (kind === "hls") {
     if ((t.hlsChildren || []).includes(details.url)) return; // a quality of a listed master

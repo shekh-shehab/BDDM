@@ -107,6 +107,16 @@ func (m *Manager) probePending(j *Job) {
 	var info probeInfo
 	var err error
 	dl, isDrive := parseDriveLink(rawURL)
+	if isOneShot(rawURL, h.Referer) {
+		// A link that works once (oneshot.go): asking for the size would
+		// use it up. The name comes from the browser, the link or the page.
+		m.mu.Lock()
+		if j.pend != nil {
+			j.pend.probing = false
+		}
+		m.mu.Unlock()
+		return
+	}
 	switch {
 	case isDrive && dl.Kind == "file":
 		_, info, err = resolveDrive(ctx, m.client, dl, h)

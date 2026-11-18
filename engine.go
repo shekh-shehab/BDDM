@@ -575,6 +575,9 @@ func (m *Manager) Add(r AddRequest) (JobView, error) {
 	if driveNonFilePage(r.URL) {
 		return JobView{}, errDrivePage
 	}
+	if oneShotPage(r.URL) {
+		return JobView{}, errors.New(msgOneShotPage)
+	}
 	if !r.Force {
 		if d := m.FindDone(r.URL); d != nil {
 			return JobView{}, &DuplicateError{Name: d.Name}
@@ -1108,7 +1111,13 @@ func (m *Manager) runJob(ctx context.Context, j *Job) error {
 			if j.Name != "" && fileExists(filepath.Join(dir, j.Name)+".bddm.json") {
 				n = 1 // continuing: only the first byte (the data is on disk)
 			}
+			if isOneShot(rawURL, hdr.Referer) {
+				n = 0 // works once: one plain request for the whole file (oneshot.go)
+			}
 			info, first, err = probeKeep(ctx, m.client, rawURL, hdr, n)
+			if n == 0 && err == nil {
+				info.CanRange = false // no second connection
+			}
 		}
 		if err == nil || ctx.Err() != nil {
 			break
@@ -1501,14 +1510,18 @@ func probeKeep(ctx context.Context, client *http.Client, rawURL string, h reqHea
 	if err != nil {
 		return info, nil, err
 	}
-	get.Header.Set("Range", fmt.Sprintf("bytes=0-%d", max(n, 1)-1))
+	if n > 0 {
+		get.Header.Set("Range", fmt.Sprintf("bytes=0-%d", n-1))
+	}
 	resp, err := client.Do(get)
 	if err != nil {
 		return info, nil, err
 	}
 	noRanges := false
-	switch resp.StatusCode {
-	case http.StatusRequestedRangeNotSatisfiable, http.StatusBadRequest, http.StatusForbidden, http.StatusNotImplemented:
+	switch code := resp.StatusCode; {
+	case n <= 0:
+		// No Range was asked for: nothing to ask again without it.
+	case code == http.StatusRequestedRangeNotSatisfiable || code == http.StatusBadRequest || code == http.StatusForbidden || code == http.StatusNotImplemented:
 		// Some servers refuse any Range header: ask once more without it.
 		drain(resp)
 		if get, err = newRequest(ctx, http.MethodGet, rawURL, h); err != nil {

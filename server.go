@@ -440,6 +440,14 @@ func (s *server) handlePasted(w http.ResponseWriter, r *http.Request) {
 	if s.handleDrive(w, req, false) {
 		return
 	}
+	if oneShotPage(req.URL) {
+		writeJSON(w, 400, map[string]any{"ok": false, "error": msgOneShotPage})
+		return
+	}
+	if isOneShot(req.URL, req.Referer) {
+		s.addFile(w, req) // no look at the link first: it works only once
+		return
+	}
 	extras := len(req.Mirrors) > 0 || strings.TrimSpace(req.Hash) != ""
 	if !extras && (isVideoRequest(req) || looksLikeWebPage(s.m.client, req.URL)) {
 		s.addVideo(w, req)
