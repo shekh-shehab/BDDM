@@ -1,4 +1,4 @@
-BDDM 1.4.3 - installing on a Windows computer
+BDDM 1.4.4 - installing on a Windows computer
 =============================================
 
 1. Install BDDM
@@ -92,8 +92,23 @@ Firefox
     extension\manifests\base.json before signing.
 
 
-3. What is new in 1.4.3
+3. What is new in 1.4.4
 -----------------------
+The browser extension is unchanged (still 1.4.2.1). You do not need to
+reload or reinstall it.
+- When a new version is published on GitHub, BDDM shows a notice and an
+  Install button. Nothing is downloaded or installed until you press
+  Install. The setup file is checked (size, and SHA-256 when the release
+  includes it). Running downloads are paused, the update is installed
+  quietly, and BDDM starts again.
+- "View release" still opens the release page; "Later" hides the notice
+  until the next start. If the update cannot be installed, BDDM says so
+  and offers "Try again". You can cancel while the setup file is
+  downloading.
+
+
+4. What was new in 1.4.3
+------------------------
 The browser extension is unchanged (still 1.4.2.1). You do not need to
 reload or reinstall it.
 - When a new version is published on GitHub, BDDM shows a notice in the
@@ -104,7 +119,7 @@ reload or reinstall it.
   "Check for updates" button next to the version number.
 
 
-4. What was new in 1.4.2
+5. What was new in 1.4.2
 ------------------------
 Update the browser extension too (click its reload button on the
 extensions page, or install the new BDDM-firefox-signed.xpi in Firefox).
@@ -139,7 +154,7 @@ only once).
   explanation.
 
 
-5. What was new in 1.4.1
+6. What was new in 1.4.1
 ------------------------
 Fewer "HTTP 403 Forbidden" errors on sites where the browser itself can
 download (update the browser extension too: click its reload button on the
@@ -159,7 +174,7 @@ extensions page, or install the new BDDM-firefox-signed.xpi in Firefox):
 - When a site still refuses, BDDM says so plainly and explains what to do.
 
 
-6. What was new in 1.4.0
+7. What was new in 1.4.0
 ------------------------
 - Internet drops: downloads wait ("No internet connection. BDDM
   continues automatically when the connection is back") and continue by
@@ -186,7 +201,7 @@ extensions page, or install the new BDDM-firefox-signed.xpi in Firefox):
 - Errors are explained in plain words, with what to do about them.
 
 
-7. What was new in 1.3.0
+8. What was new in 1.3.0
 ------------------------
 - Folders by file type: Settings > "Folders by file type" sets a folder
   for Video, Audio, Documents, Compressed, Programs, Images and Other.
@@ -208,7 +223,7 @@ extensions page, or install the new BDDM-firefox-signed.xpi in Firefox):
   Edge and Brave.
 
 
-8. Running from the source code (developers)
+9. Running from the source code (developers)
 --------------------------------------------
 Install Go (the version in go.mod or newer), unzip BDDM-src.zip and run, in that folder:
     go run .

@@ -28,7 +28,7 @@ import (
 const port = "9614"
 
 // appVersion is the BDDM version shown in Settings and on the update notice.
-const appVersion = "1.4.3"
+const appVersion = "1.4.4"
 
 func main() {
 	noWindow := flag.Bool("nowindow", false, "do not open the window (run in the background)")
@@ -77,6 +77,10 @@ func main() {
 		func() bool { return m.Settings().CheckUpdates },
 		func() bool { return m.Settings().Notifications },
 		notify)
+	upd.dir = configDir
+	upd.running = m.RunningCount
+	upd.prepare = m.PauseAllRunning
+	upd.runSetup = runSilentSetup
 	upd.Start()
 
 	srv := &http.Server{ReadHeaderTimeout: 10 * time.Second}
@@ -93,6 +97,7 @@ func main() {
 			close(stopped)
 		})
 	}
+	upd.quitFn = quit
 	srv.Handler = newServer(m, port, quit, upd)
 
 	// Ctrl+C in the terminal also stops cleanly.

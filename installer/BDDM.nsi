@@ -9,9 +9,13 @@ Unicode true
 Target amd64-unicode
 !include "MUI2.nsh"
 !include "LogicLib.nsh"
+!include "FileFunc.nsh"
+!include "Sections.nsh"
+!insertmacro GetParameters
+!insertmacro GetOptions
 
 !ifndef VERSION
-  !define VERSION "1.4.3"
+  !define VERSION "1.4.4"
 !endif
 !define APP "BDDM"
 !define APPNAME "BDDM Download Manager"
@@ -113,6 +117,32 @@ SectionEnd
 Section "Start BDDM with Windows (in the background)" SecAutostart
   WriteRegStr HKCU "${RUNKEY}" "BDDM" '"$INSTDIR\BDDM.exe" -nowindow'
 SectionEnd
+
+Var StartAfter
+
+Function .onInit
+  StrCpy $StartAfter "0"
+  ${GetParameters} $0
+  ClearErrors
+  ${GetOptions} $0 "/run" $1
+  IfErrors +2
+    StrCpy $StartAfter "1"
+
+  ; Silent upgrade of an existing install: leave the desktop shortcut
+  ; and "Start with Windows" choices as the user already set them.
+  IfSilent 0 done_init
+  ReadRegStr $2 HKCU "Software\BDDM" "InstallDir"
+  IfErrors done_init
+    !insertmacro UnselectSection ${SecDesktop}
+    !insertmacro UnselectSection ${SecAutostart}
+  done_init:
+FunctionEnd
+
+Function .onInstSuccess
+  ${If} $StartAfter == "1"
+    Exec '"$INSTDIR\BDDM.exe"'
+  ${EndIf}
+FunctionEnd
 
 Function ShowExtensionGuide
   ExecShell "open" "$INSTDIR\INSTALL.txt"

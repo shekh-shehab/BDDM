@@ -365,6 +365,20 @@ func newServer(m *Manager, port string, quit func(), upd *Updater) http.Handler 
 		}
 		reply(w, s.upd.OpenRelease())
 	})
+	mux.HandleFunc("POST /api/update/install", func(w http.ResponseWriter, r *http.Request) {
+		if s.upd == nil {
+			writeJSON(w, 200, UpdateStatus{Current: appVersion, State: "error", Error: "No installer is available for this release."})
+			return
+		}
+		writeJSON(w, 200, s.upd.Install())
+	})
+	mux.HandleFunc("POST /api/update/cancel", func(w http.ResponseWriter, r *http.Request) {
+		if s.upd == nil {
+			writeJSON(w, 200, UpdateStatus{Current: appVersion})
+			return
+		}
+		writeJSON(w, 200, s.upd.Cancel())
+	})
 	mux.HandleFunc("POST /api/quit", func(w http.ResponseWriter, r *http.Request) {
 		reply(w, nil)
 		go s.quit()

@@ -43,6 +43,11 @@ func escapeAS(s string) string {
 	return string(out)
 }
 
+// runSilentSetup is only used on Windows; tests replace it with a fake.
+func runSilentSetup(path string) error {
+	return fmt.Errorf("updates can only be installed on Windows")
+}
+
 // openURL opens an http(s) address in the default browser.
 func openURL(raw string) error {
 	if err := validWebURL(raw); err != nil {

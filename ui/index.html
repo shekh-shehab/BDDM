@@ -119,7 +119,9 @@
   #offline.show { display: block; }
   #updateBanner { display: none; align-items: center; justify-content: center; gap: 16px; flex-wrap: wrap; background: #172554; color: #93c5fd; padding: 8px 20px; border-bottom: 1px solid #1e3a8a; }
   #updateBanner.show { display: flex; }
+  #updateBanner.error { background: #450a0a; color: #fecaca; border-bottom-color: #7f1d1d; }
   #updateBanner .ubtns { display: flex; gap: 8px; }
+  #updateBanner .bar { margin: 0; width: 180px; }
 </style>
 </head>
 <body>
@@ -139,8 +141,14 @@
 <div id="offline">BDDM is not running. Start it again to continue.</div>
 <div id="updateBanner">
   <span id="updateText">A new version of BDDM is available</span>
+  <div id="updateProgressWrap" hidden>
+    <div class="bar"><div id="updateFill"></div></div>
+  </div>
   <div class="ubtns">
-    <button id="updateView" class="small primary">View release</button>
+    <button id="updateView" class="small">View release</button>
+    <button id="updateInstall" class="small primary">Install</button>
+    <button id="updateCancel" class="small" hidden>Cancel</button>
+    <button id="updateRetry" class="small primary" hidden>Try again</button>
     <button id="updateLater" class="small">Later</button>
   </div>
 </div>
@@ -200,7 +208,7 @@
       <div class="field check">
         <input id="setCheckUpdates" type="checkbox"><label for="setCheckUpdates" style="margin:0">Check for updates automatically</label>
       </div>
-      <div class="hint" style="margin:-10px 0 16px">BDDM looks for a new version on GitHub when it starts and about every 6 hours. It only shows a notice; it does not install anything by itself.</div>
+      <div class="hint" style="margin:-10px 0 16px">BDDM looks for a new version on GitHub when it starts and about every 6 hours. It only installs when you press Install.</div>
       <button id="saveSettings" class="primary">Save settings</button>
     </div>
     <div class="card" style="margin-top:16px">
@@ -214,6 +222,7 @@
     <div class="hint" id="appVersion" style="margin-top:12px;text-align:center"></div>
     <div style="text-align:center;margin-top:8px">
       <button id="checkUpdatesBtn" class="small">Check for updates</button>
+      <button id="settingsInstallBtn" class="small primary" hidden>Install</button>
       <div id="updateStatus" class="hint" style="margin-top:6px"></div>
     </div>
     <div class="card" style="margin-top:16px">
@@ -825,14 +834,57 @@ $("openDir").onclick = () => api("/api/openfolder", {}).catch((e) => toast("Coul
 async function refreshUpdate() {
   try {
     const u = await api("/api/update");
-    const show = !!u.available;
+    const state = u.state || "";
+    const show = !!u.available || state === "downloading" || state === "installing" || state === "error";
     $("updateBanner").classList.toggle("show", show);
-    if (show) $("updateText").textContent = "BDDM v" + u.version + " is available";
+    $("updateBanner").classList.toggle("error", state === "error");
+    const busy = state === "downloading" || state === "installing";
+    $("updateProgressWrap").hidden = state !== "downloading";
+    if (state === "downloading") {
+      const pct = u.total > 0 ? Math.max(0, Math.min(100, 100 * u.done / u.total)) : 0;
+      $("updateFill").style.width = pct.toFixed(1) + "%";
+      $("updateText").textContent = "Downloading the update... " + Math.round(pct) + "%";
+    } else if (state === "installing") {
+      $("updateText").textContent = "Installing the update...";
+    } else if (state === "error") {
+      $("updateText").textContent = u.error || "The update could not be installed.";
+    } else if (show) {
+      $("updateText").textContent = "BDDM v" + u.version + " is available";
+    }
+    $("updateView").hidden = busy;
+    $("updateInstall").hidden = !(show && !state && u.canInstall);
+    $("updateCancel").hidden = state !== "downloading";
+    $("updateRetry").hidden = state !== "error";
+    $("updateLater").hidden = busy;
+    $("settingsInstallBtn").hidden = !((u.canInstall && !state) || state === "error");
+    $("settingsInstallBtn").textContent = state === "error" ? "Try again" : "Install";
     if (u.checking) $("updateStatus").textContent = "Checking...";
+    else if (state === "error") $("updateStatus").textContent = u.error || "";
+    else if (state === "downloading") $("updateStatus").textContent = "Downloading the update...";
+    else if (state === "installing") $("updateStatus").textContent = "Installing the update...";
     else $("updateStatus").textContent = u.message || "";
   } catch (e) {}
 }
+async function startInstall() {
+  let u;
+  try { u = await api("/api/update"); } catch (e) { toast("Could not start the update", e.message, "bad"); return; }
+  if (u.state === "downloading" || u.state === "installing") return;
+  if (u.running > 0) {
+    const word = u.running === 1 ? "download is" : "downloads are";
+    const a = await confirmBox("Install update", u.running + " " + word + " running. They will be paused and will continue after BDDM restarts.", "Install");
+    if (!a.ok) return;
+  }
+  try { await api("/api/update/install", {}); } catch (e) { toast("Could not start the update", e.message, "bad"); }
+  refreshUpdate();
+}
 $("updateView").onclick = () => api("/api/update/open", {}).catch((e) => toast("Could not open the release page", e.message, "bad"));
+$("updateInstall").onclick = startInstall;
+$("settingsInstallBtn").onclick = startInstall;
+$("updateRetry").onclick = startInstall;
+$("updateCancel").onclick = async () => {
+  try { await api("/api/update/cancel", {}); } catch (e) {}
+  refreshUpdate();
+};
 $("updateLater").onclick = async () => {
   try { await api("/api/update/dismiss", {}); } catch (e) {}
   $("updateBanner").classList.remove("show");
@@ -844,7 +896,7 @@ $("checkUpdatesBtn").onclick = async () => {
   $("checkUpdatesBtn").disabled = false;
   refreshUpdate();
 };
-setInterval(refreshUpdate, 2000);
+setInterval(refreshUpdate, 1000);
 refreshUpdate();
 
 // ---------- quit ----------

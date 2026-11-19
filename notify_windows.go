@@ -102,6 +102,18 @@ try {
 	}
 }
 
+// runSilentSetup starts the downloaded BDDM-Setup.exe as a silent upgrade
+// that puts BDDM back after it finishes.
+func runSilentSetup(path string) error {
+	path = filepath.Clean(path)
+	if !filepath.IsAbs(path) || !strings.EqualFold(filepath.Ext(path), ".exe") {
+		return fmt.Errorf("the update file is not a setup program")
+	}
+	cmd := exec.Command(path, "/S", "/run")
+	hideConsole(cmd)
+	return cmd.Start()
+}
+
 // openURL opens an http(s) address in the default browser.
 func openURL(raw string) error {
 	if err := validWebURL(raw); err != nil {

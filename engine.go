@@ -690,6 +690,46 @@ func (m *Manager) Pause(id string) error {
 	return nil
 }
 
+// RunningCount is the number of downloads in progress (not queued or paused).
+func (m *Manager) RunningCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n := 0
+	for _, j := range m.jobs {
+		if !j.Removed && j.Status == StatusDownloading {
+			n++
+		}
+	}
+	return n
+}
+
+// PauseAllRunning pauses every download that is in progress and waits until
+// their progress has been saved. Queued items are left as they are (Shutdown
+// will pause them when BDDM exits).
+func (m *Manager) PauseAllRunning() {
+	m.mu.Lock()
+	var running []*Job
+	for _, j := range m.jobs {
+		if j.Removed || j.Status != StatusDownloading {
+			continue
+		}
+		j.stopReason = "pause"
+		if j.cancel != nil {
+			j.cancel()
+		}
+		j.Status = StatusPaused
+		running = append(running, j)
+	}
+	m.saveHistoryLocked()
+	m.mu.Unlock()
+	for _, j := range running {
+		m.waitStopped(j)
+	}
+	m.mu.Lock()
+	m.saveHistoryLocked()
+	m.mu.Unlock()
+}
+
 func (m *Manager) waitStopped(j *Job) {
 	m.mu.Lock()
 	ch := j.finished
