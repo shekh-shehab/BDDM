@@ -28,7 +28,7 @@ import (
 const port = "9614"
 
 // appVersion is the BDDM version shown in Settings and on the update notice.
-const appVersion = "1.4.4"
+const appVersion = "1.4.5"
 
 func main() {
 	noWindow := flag.Bool("nowindow", false, "do not open the window (run in the background)")
@@ -116,6 +116,21 @@ func main() {
 	}()
 
 	for _, u := range flag.Args() {
+		if isMagnet(u) || looksLikeTorrentPath(u) {
+			var job JobView
+			var err error
+			if isMagnet(u) {
+				job, err = m.AddTorrentMagnet(u)
+			} else {
+				job, err = m.AddTorrentFile(u, nil)
+			}
+			if err != nil {
+				log.Printf("could not add %s: %v", u, err)
+				continue
+			}
+			_ = openAppWindowSize("http://127.0.0.1:"+port+"/torrent.html?id="+job.ID, 560, 620)
+			continue
+		}
 		if _, err := m.Add(AddRequest{URL: u, Force: true}); err != nil {
 			log.Printf("could not add %s: %v", u, err)
 		}

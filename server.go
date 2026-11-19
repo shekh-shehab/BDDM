@@ -76,6 +76,11 @@ func newServer(m *Manager, port string, quit func(), upd *Updater) http.Handler 
 	})
 	mux.HandleFunc("POST /api/add", s.handlePasted)
 	mux.HandleFunc("POST /add", s.handleCaptured) // for the browser extension
+	mux.HandleFunc("POST /api/torrent/add", s.handleTorrentAdd)
+	mux.HandleFunc("POST /api/torrent/pick", s.handleTorrentPick)
+	mux.HandleFunc("GET /api/torrent/{id}", s.handleTorrentPending)
+	mux.HandleFunc("POST /api/torrent/{id}/start", s.handleTorrentStart)
+	mux.HandleFunc("POST /api/torrent/{id}/cancel", s.handleTorrentCancel)
 
 	// Endpoints for the Chrome extension.
 	mux.HandleFunc("GET /ext/ping", func(w http.ResponseWriter, r *http.Request) {
@@ -419,7 +424,8 @@ func (s *server) guard(next http.Handler) http.Handler {
 			return
 		}
 		if r.Method == http.MethodPost && r.URL.Path != "/api/quit" {
-			if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") && r.ContentLength != 0 {
+			ct := r.Header.Get("Content-Type")
+			if r.ContentLength != 0 && !strings.HasPrefix(ct, "application/json") && !strings.HasPrefix(ct, "multipart/form-data") {
 				http.Error(w, "send JSON", http.StatusUnsupportedMediaType)
 				return
 			}
@@ -476,6 +482,10 @@ func (s *server) handlePasted(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.URL = strings.TrimSpace(req.URL)
+	if isMagnet(req.URL) || looksLikeTorrentPath(req.URL) {
+		s.addTorrentFromPaste(w, req.URL)
+		return
+	}
 	if driveNonFilePage(req.URL) {
 		writeJSON(w, 400, map[string]any{"ok": false, "error": errDrivePage.Error()})
 		return
@@ -509,6 +519,10 @@ func (s *server) handleCaptured(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.URL = strings.TrimSpace(req.URL)
+	if isMagnet(req.URL) || looksLikeTorrentPath(req.URL) {
+		s.addTorrentFromPaste(w, req.URL)
+		return
+	}
 	if driveNonFilePage(req.URL) {
 		writeJSON(w, 400, map[string]any{"ok": false, "error": errDrivePage.Error()})
 		return

@@ -82,6 +82,17 @@ func pickFolder(start string) (string, error) {
 	return "", errors.New("folder picker is only available on Windows; type the path instead")
 }
 
+func pickTorrentFile() (string, error) {
+	if p, err := exec.LookPath("zenity"); err == nil && os.Getenv("DISPLAY") != "" {
+		out, err := exec.Command(p, "--file-selection", "--file-filter=Torrent files | *.torrent", "--title=Add torrent").Output()
+		if err != nil {
+			return "", nil // cancelled
+		}
+		return trimNL(string(out)), nil
+	}
+	return "", errors.New("the file picker is only available on Windows; choose a .torrent file in the window instead")
+}
+
 func trimNL(s string) string {
 	for len(s) > 0 && (s[len(s)-1] == '\n' || s[len(s)-1] == '\r') {
 		s = s[:len(s)-1]

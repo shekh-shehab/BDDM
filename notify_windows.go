@@ -157,6 +157,28 @@ if ($d.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) {
 	return strings.TrimSpace(out), nil
 }
 
+// pickTorrentFile shows the Windows "Open" dialog for a .torrent file.
+// Returns "" if cancelled.
+func pickTorrentFile() (string, error) {
+	script := `
+Add-Type -AssemblyName System.Windows.Forms
+$owner = New-Object System.Windows.Forms.Form -Property @{TopMost = $true; ShowInTaskbar = $false}
+$d = New-Object System.Windows.Forms.OpenFileDialog
+$d.Title = 'Add torrent'
+$d.Filter = 'Torrent files (*.torrent)|*.torrent|All files (*.*)|*.*'
+$d.Multiselect = $false
+if ($d.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) {
+  [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+  Write-Output $d.FileName
+}
+`
+	out, err := runPowerShell(script, 10*time.Minute)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
 // openAppWindow opens the UI as an app window: Edge, then Chrome, then the
 // default browser.
 func openAppWindow(u string) error { return openAppWindowSize(u, 1100, 720) }

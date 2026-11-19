@@ -200,6 +200,8 @@ type Job struct {
 	TSFix bool `json:"tsFix,omitempty"`
 	// RefAlts: other Referers to try when the site answers 403 (referer.go).
 	RefAlts []string `json:"refAlts,omitempty"`
+	// Torrent: BitTorrent-specific state (torrent.go). Kind is "torrent".
+	Torrent *TorrentInfo `json:"torrent,omitempty"`
 
 	// Runtime only.
 	// extra / jar: headers the browser sent for the link and the cookies of
@@ -233,6 +235,14 @@ type Job struct {
 	restarts  int  // automatic restarts in this run (file changed, new link)
 	netWait   bool // waiting for the internet connection to come back
 	skipFrags bool // video: let yt-dlp skip stream pieces that keep failing
+
+	// Torrents (runtime only; see torrent.go).
+	th      torrentHandle // the live torrent, if any
+	upSpeed float64
+	peers   int
+	tReady  bool              // add window: metadata is available
+	tSource string            // "magnet" or "file"
+	tFiles  []TorrentFileView // add window file list
 }
 
 func (j *Job) setMessage(format string, args ...any) {
@@ -284,6 +294,10 @@ type JobView struct {
 	Checked  string  `json:"checked,omitempty"`  // checksum result ("SHA-256 matches ...")
 	NetWait  bool    `json:"netWait,omitempty"`  // waiting for the internet connection
 	Mirrors  int     `json:"mirrors,omitempty"`  // extra links
+	Peers    int     `json:"peers,omitempty"`    // torrent: connected peers
+	UpSpeed  float64 `json:"upSpeed,omitempty"`  // torrent: upload bytes/s
+	Files    int     `json:"files,omitempty"`    // torrent: number of files
+	Uploaded int64   `json:"uploaded,omitempty"` // torrent: bytes uploaded
 }
 
 func (j *Job) viewLocked() JobView {
@@ -319,6 +333,32 @@ func (j *Job) viewLocked() JobView {
 		j.liveMu.Unlock()
 		if v.Speed > 1 && j.Size > 0 && j.Size > v.Done {
 			v.ETA = int64(float64(j.Size-v.Done) / v.Speed)
+		}
+	}
+	if j.Kind == kindTorrent {
+		j.liveMu.Lock()
+		v.Peers = j.peers
+		v.UpSpeed = j.upSpeed
+		if j.Status == StatusSeeding {
+			v.Speed = 0
+			if time.Since(j.msgTime) < 30*time.Second {
+				v.Message = j.message
+			}
+			if v.UpSpeed <= 0 && time.Since(j.msgTime) >= 0 {
+				// keep the last measured upload speed
+			}
+		}
+		j.liveMu.Unlock()
+		if j.Torrent != nil {
+			v.Files = j.Torrent.Files
+			v.Uploaded = j.Torrent.Uploaded
+		}
+		if (j.Status == StatusSeeding || j.Status == StatusDone) && j.Size > 0 {
+			v.Done = j.Size
+		}
+		if j.Status == StatusSeeding && v.UpSpeed > 0 {
+			// no ETA while seeding
+			v.ETA = -1
 		}
 	}
 	return v
@@ -371,6 +411,9 @@ type Manager struct {
 	driveFolders map[string]*driveFolder // Google Drive folders waiting in their window
 	groups       []*Group                // folder downloads (groups.go)
 	ann          announcer               // toasts / notifications (groups.go)
+
+	tClient   torrentClient // shared BitTorrent client (torrent.go)
+	tLoopback bool          // tests: listen on 127.0.0.1 only, no DHT
 }
 
 func NewManager(configDir string, notify func(title, body string)) (*Manager, error) {
@@ -398,7 +441,17 @@ func NewManager(configDir string, notify func(title, body string)) (*Manager, er
 			log.Printf("could not read history: %v", err)
 		}
 		for _, j := range jobs {
-			if j == nil || j.ID == "" || j.URL == "" {
+			if j == nil || j.ID == "" || (j.URL == "" && j.Kind != kindTorrent) {
+				continue
+			}
+			if j.Kind == kindTorrent {
+				// User-paused stays paused. Downloading and seeding torrents
+				// are started again after the history is loaded.
+				if j.Status == StatusQueued {
+					j.Status = StatusDownloading
+				}
+				j.done.Store(j.Done)
+				m.jobs = append(m.jobs, j)
 				continue
 			}
 			// Anything that was running when the app closed (or crashed)
@@ -427,6 +480,7 @@ func NewManager(configDir string, notify func(title, body string)) (*Manager, er
 		}
 	}
 	m.scheduleLocked()
+	m.restoreTorrentsLocked()
 	m.mu.Unlock()
 	go m.autosave()
 	return m, nil
@@ -658,7 +712,7 @@ func (m *Manager) ClearHistory() {
 	keep := m.jobs[:0]
 	for _, j := range m.jobs {
 		unfinished := j.Status == StatusQueued || j.Status == StatusDownloading || j.Status == StatusPaused ||
-			j.Status == StatusPending
+			j.Status == StatusPending || j.Status == StatusSeeding
 		if j.cancel != nil || (unfinished && !j.Removed) {
 			keep = append(keep, j)
 		}
@@ -675,7 +729,7 @@ func (m *Manager) Pause(id string) error {
 		return errors.New("download not found")
 	}
 	switch j.Status {
-	case StatusDownloading:
+	case StatusDownloading, StatusSeeding:
 		j.stopReason = "pause"
 		if j.cancel != nil {
 			j.cancel()
@@ -710,7 +764,7 @@ func (m *Manager) PauseAllRunning() {
 	m.mu.Lock()
 	var running []*Job
 	for _, j := range m.jobs {
-		if j.Removed || j.Status != StatusDownloading {
+		if j.Removed || (j.Status != StatusDownloading && j.Status != StatusSeeding) {
 			continue
 		}
 		j.stopReason = "pause"
@@ -754,9 +808,19 @@ func (m *Manager) Resume(id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if j.Status == StatusPaused || j.Status == StatusError {
-		j.Status = StatusQueued
 		j.Error = ""
 		j.Removed = false
+		if j.Kind == kindTorrent {
+			if err := m.startTorrentLocked(j); err != nil {
+				j.Status = StatusError
+				j.Error = err.Error()
+				m.saveHistoryLocked()
+				return err
+			}
+			m.saveHistoryLocked()
+			return nil
+		}
+		j.Status = StatusQueued
 		if g := m.findGroupLocked(j.Group); j.Group != "" && g != nil && g.Notified {
 			g.Notified = false // tell about the folder again when it is done
 			m.saveGroupsLocked()
@@ -784,10 +848,13 @@ func (m *Manager) Delete(id string, deleteFile bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	j.Removed = true
-	if j.Status == StatusDownloading || j.Status == StatusQueued {
+	if j.Status == StatusDownloading || j.Status == StatusQueued || j.Status == StatusSeeding {
 		j.Status = StatusPaused
 	}
-	if deleteFile && j.Kind == "video" {
+	if deleteFile && j.Kind == kindTorrent {
+		m.removeTorrentFiles(j)
+		m.removeTorrentMeta(j)
+	} else if deleteFile && j.Kind == "video" {
 		removeVideoFiles(j)
 	} else if deleteFile && j.Name != "" {
 		full := filepath.Join(j.Dir, j.Name)
@@ -814,6 +881,10 @@ func (m *Manager) FilePath(id string) (dir, file string, err error) {
 	if j == nil {
 		return "", "", errors.New("download not found")
 	}
+	if j.Kind == kindTorrent {
+		dir, file := torrentDataPath(j)
+		return dir, file, nil
+	}
 	if j.Status == StatusDone && j.Name != "" {
 		f := filepath.Join(j.Dir, j.Name)
 		if fileExists(f) {
@@ -834,6 +905,12 @@ func (m *Manager) Shutdown() {
 			j.cancel()
 			running = append(running, j)
 		}
+		if j.Kind == kindTorrent {
+			if j.Status == StatusDownloading || j.Status == StatusSeeding || j.Status == StatusQueued {
+				j.Interrupted = true // resume or keep seeding on the next start
+			}
+			continue
+		}
 		if j.cancel != nil || j.Status == StatusQueued {
 			j.Interrupted = true // continues when BDDM starts again
 		}
@@ -844,10 +921,14 @@ func (m *Manager) Shutdown() {
 	}
 	m.mu.Lock()
 	for _, j := range m.jobs {
+		if j.Kind == kindTorrent {
+			continue
+		}
 		if j.Status == StatusDownloading || j.Status == StatusQueued {
 			j.Status = StatusPaused
 		}
 	}
+	m.closeTorrentClientLocked()
 	m.saveHistoryLocked()
 	m.mu.Unlock()
 }
@@ -860,7 +941,7 @@ func (m *Manager) scheduleLocked() {
 	// while Google asks to slow down); other downloads use the setting.
 	active, activeDrive := 0, 0
 	for _, j := range m.jobs {
-		if j.cancel != nil {
+		if j.cancel != nil && j.Kind != kindTorrent {
 			if isDriveJob(j) {
 				activeDrive++
 			} else {
@@ -873,7 +954,7 @@ func (m *Manager) scheduleLocked() {
 		if active >= m.settings.MaxActive && activeDrive >= driveLimit {
 			return
 		}
-		if j.Status != StatusQueued || j.Removed || j.cancel != nil {
+		if j.Status != StatusQueued || j.Removed || j.cancel != nil || j.Kind == kindTorrent {
 			continue
 		}
 		if isDriveJob(j) {

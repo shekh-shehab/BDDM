@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Add torrent</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%233b82f6'/%3E%3Cpath d='M32 14v26m-11-11 11 11 11-11M18 48h28' stroke='white' stroke-width='6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #14161b; --panel: #1c1f26; --panel2: #232733; --line: #2e3340;
+    --text: #e6e8ee; --muted: #8b93a7; --accent: #3b82f6; --accent2: #2563eb;
+    --ok: #22c55e; --warn: #f59e0b; --bad: #ef4444;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { background: var(--bg); color: var(--text); font: 14px/1.4 "Segoe UI", system-ui, -apple-system, sans-serif; display: flex; flex-direction: column; }
+  header { display: flex; align-items: center; gap: 10px; padding: 12px 18px; background: var(--panel); border-bottom: 1px solid var(--line); font-weight: 700; font-size: 16px; }
+  header svg { width: 24px; height: 24px; flex: none; }
+  main { flex: 1; padding: 16px 18px 8px; overflow: auto; }
+  .field { margin-bottom: 13px; }
+  .field label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; margin-bottom: 5px; }
+  .line { display: flex; gap: 8px; }
+  input[type=text] { flex: 1; width: 100%; font: inherit; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 11px; outline: none; }
+  input:focus { border-color: var(--accent); }
+  .value { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .value.muted { color: var(--muted); }
+  .row2 { display: flex; gap: 10px; }
+  .row2 .field { flex: 1; min-width: 0; }
+  .row2 .field.size { flex: 0 0 160px; }
+  button { font: inherit; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; cursor: pointer; white-space: nowrap; }
+  button:hover { border-color: #49506a; background: #2a2f3d; }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button.primary:hover { background: var(--accent2); }
+  .err { color: #fca5a5; font-size: 13px; min-height: 18px; }
+  footer { display: flex; gap: 8px; align-items: center; padding: 12px 18px; background: var(--panel); border-top: 1px solid var(--line); }
+  footer .spacer { flex: 1; }
+  .dim { color: var(--muted); font-size: 12px; }
+  .flist { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; max-height: 180px; overflow: auto; }
+  .frow { display: flex; gap: 10px; justify-content: space-between; padding: 7px 11px; border-bottom: 1px solid var(--line); font-size: 13px; }
+  .frow:last-child { border-bottom: 0; }
+  .frow .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .frow .sz { color: var(--muted); flex: none; }
+  .wait { color: var(--muted); padding: 16px 11px; text-align: center; }
+</style>
+</head>
+<body>
+<header>
+  <svg viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#3b82f6"/><path d="M32 14v26m-11-11 11 11 11-11M18 48h28" stroke="white" stroke-width="6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  Add torrent
+</header>
+<main>
+  <div class="field">
+    <label>Name</label>
+    <div class="value" id="name">Looking up torrent information...</div>
+  </div>
+  <div class="row2">
+    <div class="field size">
+      <label>Size</label>
+      <div class="value" id="size">...</div>
+    </div>
+    <div class="field">
+      <label>Source</label>
+      <div class="value muted" id="src">-</div>
+    </div>
+  </div>
+  <div class="field">
+    <label>Files</label>
+    <div class="flist" id="files"><div class="wait" id="fileWait">Looking up the file list...</div></div>
+  </div>
+  <div class="field">
+    <label for="dir">Save to</label>
+    <div class="line">
+      <input id="dir" type="text" spellcheck="false" autocomplete="off">
+      <button id="browse" type="button">Browse...</button>
+    </div>
+  </div>
+  <div class="err" id="err"></div>
+</main>
+<footer>
+  <span class="dim" id="note">All files will be downloaded. Seeding continues while BDDM is running.</span>
+  <div class="spacer"></div>
+  <button id="cancel">Cancel</button>
+  <button id="start" class="primary" disabled>Start</button>
+</footer>
+<script>
+const $ = (id) => document.getElementById(id);
+const id = new URLSearchParams(location.search).get("id") || "";
+let answered = false, dirTouched = false, timer = null;
+
+function fmtBytes(n) {
+  if (!n || n < 0) return "Unknown";
+  const u = ["B","KB","MB","GB","TB"];
+  let i = 0, x = n;
+  while (x >= 1024 && i < u.length-1) { x /= 1024; i++; }
+  return (i === 0 ? x : x.toFixed(x >= 10 ? 1 : 2)) + " " + u[i];
+}
+async function api(path, body) {
+  const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
+  const t = await r.text();
+  let v = {};
+  try { v = JSON.parse(t); } catch (e) { throw new Error(t || r.statusText); }
+  if (!r.ok || v.ok === false) throw new Error(v.error || t || r.statusText);
+  return v;
+}
+function gone(msg) { document.body.innerHTML = "<p style='padding:24px;color:#8b93a7'>" + msg + "</p>"; }
+async function load() {
+  if (!id) { $("err").textContent = "Missing torrent id."; return; }
+  const r = await fetch("/api/torrent/" + encodeURIComponent(id));
+  const v = await r.json();
+  if (!r.ok || v.error && !v.id) {
+    $("err").textContent = v.error || "Torrent not found.";
+    $("start").disabled = true;
+    return;
+  }
+  $("name").textContent = v.name || "Looking up torrent information...";
+  $("size").textContent = v.ready ? fmtBytes(v.size) : "Looking up...";
+  $("src").textContent = v.source === "file" ? ".torrent file" : "magnet link";
+  if (!dirTouched && v.dir) $("dir").value = v.dir;
+  const box = $("files");
+  if (v.files && v.files.length) {
+    box.innerHTML = "";
+    v.files.forEach((f) => {
+      const row = document.createElement("div");
+      row.className = "frow";
+      const nm = document.createElement("span"); nm.className = "nm"; nm.textContent = f.path; nm.title = f.path;
+      const sz = document.createElement("span"); sz.className = "sz"; sz.textContent = fmtBytes(f.size);
+      row.append(nm, sz);
+      box.append(row);
+    });
+    $("note").textContent = v.files.length + (v.files.length === 1 ? " file" : " files") + ", " + fmtBytes(v.size) + ". All files will be downloaded.";
+  } else if (v.ready) {
+    box.innerHTML = "<div class='wait'>No files listed.</div>";
+  } else {
+    box.innerHTML = "<div class='wait' id='fileWait'>Looking up the file list...</div>";
+  }
+  if (v.error) {
+    $("err").textContent = v.error;
+    $("start").disabled = true;
+    if (!v.ready) return;
+  } else {
+    $("err").textContent = "";
+    $("start").disabled = !v.ready;
+  }
+  if (!v.ready && !v.error) timer = setTimeout(load, 800);
+}
+async function start() {
+  $("err").textContent = "";
+  $("start").disabled = true; $("cancel").disabled = true;
+  try {
+    await api("/api/torrent/" + encodeURIComponent(id) + "/start", { dir: $("dir").value });
+    answered = true;
+    window.close();
+    setTimeout(() => gone("Download started. You can close this window."), 300);
+  } catch (e) {
+    $("err").textContent = e.message;
+    $("start").disabled = false; $("cancel").disabled = false;
+  }
+}
+async function cancel() {
+  if (!answered) {
+    answered = true;
+    try { await api("/api/torrent/" + encodeURIComponent(id) + "/cancel", {}); } catch (e) {}
+  }
+  window.close();
+  setTimeout(() => gone("Cancelled. You can close this window."), 300);
+}
+$("dir").oninput = () => { dirTouched = true; };
+$("start").onclick = start;
+$("cancel").onclick = cancel;
+$("browse").onclick = async () => {
+  $("browse").disabled = true;
+  try {
+    const r = await api("/api/pickfolder", { start: $("dir").value });
+    if (r.dir) { $("dir").value = r.dir; dirTouched = true; }
+  } catch (e) { $("err").textContent = "Folder picker: " + e.message; }
+  $("browse").disabled = false;
+};
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !$("start").disabled) { e.preventDefault(); start(); }
+  if (e.key === "Escape") { e.preventDefault(); cancel(); }
+});
+window.addEventListener("pagehide", () => {
+  if (answered) return;
+  answered = true;
+  fetch("/api/torrent/" + encodeURIComponent(id) + "/cancel", {
+    method: "POST", keepalive: true, headers: { "Content-Type": "application/json" }, body: "{}",
+  }).catch(() => {});
+});
+load().then(() => { $("start").focus(); });
+</script>
+</body>
+</html>

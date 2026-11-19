@@ -51,9 +51,10 @@
   .subhead .count { font-weight: 400; }
   .subhead .arrow { color: var(--muted); width: 12px; display: inline-block; }
   .badge.Paused { color: #fcd34d; border-color: #78350f; background: #2b1a05; }
+  .badge.Seeding { color: #86efac; border-color: #14532d; background: #052e16; }
   .bar { height: 6px; background: var(--panel2); border-radius: 99px; overflow: hidden; margin: 10px 0 8px; }
   .bar > div { height: 100%; width: 0; background: var(--accent); border-radius: 99px; transition: width .4s; }
-  .bar.Done > div { background: var(--ok); }
+  .bar.Done > div, .bar.Seeding > div { background: var(--ok); }
   .bar.Error > div { background: var(--bad); }
   .bar.Paused > div { background: var(--warn); }
   .bar.unknown > div { width: 30% !important; animation: slide 1.2s infinite linear; }
@@ -68,6 +69,7 @@
   .msg.ok { color: #86efac; }
   .msg.net { color: #fcd34d; white-space: normal; }
   .morebox { display: flex; flex-direction: column; gap: 6px; margin: -6px 0 14px; font-size: 12px; color: var(--muted); }
+  .morebox[hidden] { display: none !important; }
   .morebox textarea, .morebox input { width: 100%; box-sizing: border-box; font: 13px/1.4 Consolas, monospace; }
 
   table { width: 100%; border-collapse: collapse; }
@@ -156,8 +158,10 @@
 <main>
   <section id="tab-downloads">
     <div class="addbar">
-      <input id="url" type="text" placeholder="Paste a download or video link here (https://...)" autocomplete="off" spellcheck="false">
+      <input id="url" type="text" placeholder="Paste a download, video, or magnet link here" autocomplete="off" spellcheck="false">
       <button id="addBtn" class="primary">Download</button>
+      <button id="torrentBtn" title="Add a .torrent file">Add torrent file</button>
+      <input id="torrentFile" type="file" accept=".torrent,application/x-bittorrent" hidden>
       <button id="moreBtn" title="Mirror links and checksum">Options</button>
     </div>
     <div id="moreBox" class="morebox" hidden>
@@ -383,6 +387,7 @@ async function addURL(url, force) {
     $("url").value = "";
     $("mirrors").value = ""; $("hash").value = "";
     if (r.video) { toast("Video link", "Choose the quality in the video window."); return; }
+    if (r.torrent) { toast("Torrent", "Choose the folder and press Start in the torrent window."); return; }
     if (r.message) { toast("Google Drive", r.message); return; }
     toast("Added", r.job.name);
     refresh();
@@ -393,6 +398,25 @@ async function addURL(url, force) {
 $("addBtn").onclick = () => addURL($("url").value);
 $("moreBtn").onclick = () => { $("moreBox").hidden = !$("moreBox").hidden; };
 $("url").addEventListener("keydown", (e) => { if (e.key === "Enter") addURL($("url").value); });
+$("torrentBtn").onclick = () => $("torrentFile").click();
+$("torrentFile").addEventListener("change", async () => {
+  const f = $("torrentFile").files && $("torrentFile").files[0];
+  $("torrentFile").value = "";
+  if (!f) return;
+  try {
+    const fd = new FormData();
+    fd.append("file", f, f.name);
+    const res = await fetch("/api/torrent/add", { method: "POST", body: fd });
+    const t = await res.text();
+    let r = {};
+    try { r = JSON.parse(t); } catch (e) { throw new Error(t || res.statusText); }
+    if (!res.ok || r.ok === false) throw new Error(r.error || t || res.statusText);
+    toast("Torrent", "Choose the folder and press Start in the torrent window.");
+    refresh();
+  } catch (e) {
+    toast("Could not add the torrent", e.message, "bad");
+  }
+});
 
 // ---------- download list ----------
 function makeRow(j) {
@@ -433,7 +457,8 @@ function makeRow(j) {
   r._resume.onclick = () => api("/api/jobs/" + j.id + "/resume", {}).then(refresh).catch((e) => toast("Error", e.message, "bad"));
   r._open.onclick = () => api("/api/jobs/" + j.id + "/open", {}).catch((e) => toast("Could not open folder", e.message, "bad"));
   r._del.onclick = async () => {
-    const a = await confirmBox("Delete download", "Remove \"" + r._name.textContent + "\" from the list?", "Delete", "Also delete the file from disk");
+    const also = r._kind === "torrent" ? "Also delete the files from disk" : "Also delete the file from disk";
+    const a = await confirmBox("Delete download", "Remove \"" + r._name.textContent + "\" from the list?", "Delete", also);
     if (!a.ok) return;
     try { await api("/api/jobs/" + j.id + "/delete", { deleteFile: a.checked }); refresh(); }
     catch (e) { toast("Error", e.message, "bad"); }
@@ -442,20 +467,37 @@ function makeRow(j) {
 }
 
 function updateRow(r, j) {
+  r._kind = j.kind;
   r._name.textContent = (j.kind === "video" ? "\u25B6 " : "") + j.name;
   r._name.title = j.url;
   const label = j.viewOnly ? "View only" : j.status;
   r._badge.textContent = label;
   r._badge.className = "badge " + (j.viewOnly ? "ViewOnly" : j.status);
+  const seeding = j.status === "Seeding";
   const known = j.size > 0;
-  const pct = known ? Math.min(100, (j.done * 100) / j.size) : (j.status === "Done" ? 100 : 0);
+  const pct = known ? Math.min(100, (j.done * 100) / j.size) : (j.status === "Done" || seeding ? 100 : 0);
   r._bar.className = "bar " + j.status + (!known && j.status === "Downloading" ? " unknown" : "");
   r._fill.style.width = pct.toFixed(1) + "%";
-  r._size.textContent = known ? fmtSize(j.done, true) + " / " + fmtSize(j.size) + "  (" + pct.toFixed(1) + "%)" : fmtSize(j.done, true) + " downloaded";
+  let sizeText = known ? fmtSize(j.done, true) + " / " + fmtSize(j.size) + "  (" + pct.toFixed(1) + "%)" : fmtSize(j.done, true) + " downloaded";
+  if (j.kind === "torrent" && (j.status === "Downloading" || seeding || j.peers > 0)) {
+    const n = j.peers || 0;
+    sizeText += ", " + n + " peer" + (n === 1 ? "" : "s");
+  }
+  r._size.textContent = sizeText;
   const active = j.status === "Downloading";
-  r._speed.textContent = active ? "Speed: " + (j.speed > 0 ? fmtSpeed(j.speed) : "connecting...") : "";
-  r._eta.textContent = active ? "ETA: " + fmtETA(j.eta) : (j.status === "Done" ? "Finished " + fmtTime(j.finished) : "");
-  r._pause.hidden = !(j.status === "Downloading" || j.status === "Queued");
+  if (j.kind === "torrent" && (active || seeding)) {
+    const parts = [];
+    if (active) parts.push((j.speed > 0 ? fmtSpeed(j.speed) : "connecting...") + " down");
+    parts.push((j.upSpeed > 0 ? fmtSpeed(j.upSpeed) : "0 B/s") + " up");
+    r._speed.textContent = parts.join(", ");
+  } else {
+    r._speed.textContent = active ? "Speed: " + (j.speed > 0 ? fmtSpeed(j.speed) : "connecting...") : "";
+  }
+  if (active) r._eta.textContent = "ETA: " + fmtETA(j.eta);
+  else if (seeding) r._eta.textContent = "Seeding";
+  else if (j.status === "Done") r._eta.textContent = "Finished " + fmtTime(j.finished);
+  else r._eta.textContent = "";
+  r._pause.hidden = !(j.status === "Downloading" || j.status === "Queued" || seeding);
   r._resume.hidden = !(j.status === "Paused" || (j.status === "Error" && !j.viewOnly));
   r._resume.textContent = j.status === "Error" ? "Retry" : "Resume";
   const queued = j.status === "Queued";
@@ -474,7 +516,7 @@ function updateRow(r, j) {
   else if (queued) { r._msg.className = "msg"; r._msg.textContent = j.queuePos ? "Waiting in the queue (" + j.queuePos + " of " + j.queueLen + "); starts by itself when a place is free" : "Queued"; }
   else if (j.status === "Done" && j.checked) { r._msg.className = "msg ok"; r._msg.textContent = "\u2713 " + j.checked; }
   else if (active && j.netWait) { r._msg.className = "msg net"; r._msg.textContent = j.message || "No internet connection. BDDM continues automatically when the connection is back..."; }
-  else { r._msg.className = "msg"; r._msg.textContent = active ? (j.message || "") : ""; }
+  else { r._msg.className = "msg"; r._msg.textContent = active || seeding ? (j.message || "") : ""; }
 }
 
 // ---------- folder downloads (groups) ----------

@@ -27,7 +27,7 @@ func (m *Manager) queuedLocked() []*Job {
 	}
 	var list []kj
 	for i, j := range m.jobs {
-		if j.Status == StatusQueued && !j.Removed {
+		if j.Status == StatusQueued && !j.Removed && j.Kind != kindTorrent {
 			list = append(list, kj{queueKey(j, i), j})
 		}
 	}
