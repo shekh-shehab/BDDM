@@ -26,6 +26,8 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+
+	"golang.org/x/time/rate"
 	"time"
 )
 
@@ -98,6 +100,11 @@ type Settings struct {
 	// about every 6 hours. On by default. A notice is shown; nothing is
 	// installed automatically.
 	CheckUpdates bool `json:"checkUpdates"`
+	// Speed limits in bytes/s. 0 means unlimited. A per-download limit on
+	// the job (DlLimit / UlLimit) overrides the matching global cap.
+	HTTPDownloadLimit    int64 `json:"httpDownloadLimit"`
+	TorrentDownloadLimit int64 `json:"torrentDownloadLimit"`
+	TorrentUploadLimit   int64 `json:"torrentUploadLimit"`
 }
 
 func defaultSettings() Settings {
@@ -133,6 +140,9 @@ func (s *Settings) fix() {
 		s.CookiesBrowser = ""
 	}
 	cookiesBrowser.Store(s.CookiesBrowser)
+	s.HTTPDownloadLimit = clampLimit(s.HTTPDownloadLimit)
+	s.TorrentDownloadLimit = clampLimit(s.TorrentDownloadLimit)
+	s.TorrentUploadLimit = clampLimit(s.TorrentUploadLimit)
 	s.Categories = fixCategories(s.Categories)
 	for i := range s.Categories {
 		if d := s.Categories[i].Dir; d != "" && (!filepath.IsAbs(d) || filepath.Clean(d) == filepath.Clean(s.DownloadDir)) {
@@ -202,6 +212,10 @@ type Job struct {
 	RefAlts []string `json:"refAlts,omitempty"`
 	// Torrent: BitTorrent-specific state (torrent.go). Kind is "torrent".
 	Torrent *TorrentInfo `json:"torrent,omitempty"`
+	// DlLimit / UlLimit: per-download speed caps in bytes/s. nil means use
+	// the global Settings cap; a pointer to 0 means this job is unlimited.
+	DlLimit *int64 `json:"dlLimit,omitempty"`
+	UlLimit *int64 `json:"ulLimit,omitempty"`
 
 	// Runtime only.
 	// extra / jar: headers the browser sent for the link and the cookies of
@@ -237,12 +251,14 @@ type Job struct {
 	skipFrags bool // video: let yt-dlp skip stream pieces that keep failing
 
 	// Torrents (runtime only; see torrent.go).
-	th      torrentHandle // the live torrent, if any
-	upSpeed float64
-	peers   int
-	tReady  bool              // add window: metadata is available
-	tSource string            // "magnet" or "file"
-	tFiles  []TorrentFileView // add window file list
+	th                 torrentHandle // the live torrent, if any
+	upSpeed            float64
+	peers              int
+	tPaceDown, tPaceUp int64 // last counters for per-torrent pacing
+	tPaceInit          bool
+	tReady             bool              // add window: metadata is available
+	tSource            string            // "magnet" or "file"
+	tFiles             []TorrentFileView // add window file list
 }
 
 func (j *Job) setMessage(format string, args ...any) {
@@ -298,6 +314,8 @@ type JobView struct {
 	UpSpeed  float64 `json:"upSpeed,omitempty"`  // torrent: upload bytes/s
 	Files    int     `json:"files,omitempty"`    // torrent: number of files
 	Uploaded int64   `json:"uploaded,omitempty"` // torrent: bytes uploaded
+	DlLimit  *int64  `json:"dlLimit,omitempty"`
+	UlLimit  *int64  `json:"ulLimit,omitempty"`
 }
 
 func (j *Job) viewLocked() JobView {
@@ -335,6 +353,7 @@ func (j *Job) viewLocked() JobView {
 			v.ETA = int64(float64(j.Size-v.Done) / v.Speed)
 		}
 	}
+	v.DlLimit, v.UlLimit = j.DlLimit, j.UlLimit
 	if j.Kind == kindTorrent {
 		j.liveMu.Lock()
 		v.Peers = j.peers
@@ -414,6 +433,15 @@ type Manager struct {
 
 	tClient   torrentClient // shared BitTorrent client (torrent.go)
 	tLoopback bool          // tests: listen on 127.0.0.1 only, no DHT
+
+	// Speed limits (speedlimit.go).
+	httpLim      *tokenBucket
+	jobLim       map[string]*tokenBucket
+	torDownLim   *rate.Limiter
+	torUpLim     *rate.Limiter
+	torDownShare *tokenBucket
+	torUpShare   *tokenBucket
+	torPacing    bool
 }
 
 func NewManager(configDir string, notify func(title, body string)) (*Manager, error) {
@@ -434,6 +462,7 @@ func NewManager(configDir string, notify func(title, body string)) (*Manager, er
 	}
 	m.settings.fix()
 	m.settings.StartWithWindows = autostartEnabled() // the installer may have set it
+	m.initSpeedLimits()
 
 	if data, err := os.ReadFile(m.historyPath()); err == nil {
 		var jobs []*Job
@@ -473,6 +502,7 @@ func NewManager(configDir string, notify func(title, body string)) (*Manager, er
 
 	m.loadGroups()
 	m.mu.Lock()
+	m.applySpeedLimitsLocked()
 	for _, j := range m.jobs {
 		if j.Status == StatusQueued {
 			j.Interrupted = false
@@ -559,6 +589,7 @@ func (m *Manager) SetSettings(s Settings) (Settings, error) {
 	}
 	m.mu.Lock()
 	m.settings = s
+	m.applySpeedLimitsLocked()
 	m.scheduleLocked()
 	m.mu.Unlock()
 	applyAutostart(s.StartWithWindows)
@@ -1408,7 +1439,7 @@ func (m *Manager) runJob(ctx context.Context, j *Job) error {
 		j.setMessage("Using %d connections (this server limits connections).", hl)
 	}
 	d := &download{
-		job: j, State: st, StatePath: full + ".bddm.json", File: f, client: m.client, hdr: hdr,
+		job: j, mgr: m, State: st, StatePath: full + ".bddm.json", File: f, client: m.client, hdr: hdr,
 		CanRange: info.CanRange || (resuming && len(st.Parts) > 1),
 		limiter:  connLimiter{limit: conns}, Workers: nParts, fetchURL: fetchURL, host: host,
 	}
@@ -1989,6 +2020,7 @@ type partLive struct {
 
 type download struct {
 	job       *Job
+	mgr       *Manager
 	State     *State
 	StatePath string
 	File      *os.File
@@ -2688,6 +2720,9 @@ func (d *download) fetchFrom(reqCtx context.Context, reqCancel context.CancelFun
 	var body io.Reader = resp.Body
 	if end >= 0 {
 		body = io.LimitReader(body, end-start+1)
+	}
+	if d.mgr != nil {
+		body = d.mgr.limitHTTPReader(reqCtx, d.job, body)
 	}
 
 	// partWriter counts the bytes and stops at the part's current end, which

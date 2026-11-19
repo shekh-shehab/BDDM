@@ -441,7 +441,7 @@ func (m *Manager) fastStream(ctx context.Context, j *Job, fs FastStream, s ytStr
 		return fmt.Errorf("could not create file: %w", err)
 	}
 	d := &download{
-		job: j, State: st, StatePath: full + ".bddm.json", File: f, client: m.client,
+		job: j, mgr: m, State: st, StatePath: full + ".bddm.json", File: f, client: m.client,
 		hdr: reqHeaders{Extra: s.headers}, CanRange: true, limiter: connLimiter{limit: 1 << 30},
 		Workers: workers, strict: true, shared: true,
 	}

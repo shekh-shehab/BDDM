@@ -293,6 +293,23 @@ func newServer(m *Manager, port string, quit func(), upd *Updater) http.Handler 
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		reply(w, m.Delete(r.PathValue("id"), body.DeleteFile))
 	})
+	mux.HandleFunc("POST /api/jobs/{id}/speedlimit", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Off     bool   `json:"off"`
+			DlLimit *int64 `json:"dlLimit"`
+			UlLimit *int64 `json:"ulLimit"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&body); err != nil {
+			reply(w, errors.New("bad speed limit"))
+			return
+		}
+		v, err := m.SetJobSpeedLimit(r.PathValue("id"), body.Off, body.DlLimit, body.UlLimit)
+		if err != nil {
+			reply(w, err)
+			return
+		}
+		writeJSON(w, 200, v)
+	})
 	mux.HandleFunc("POST /api/jobs/{id}/open", func(w http.ResponseWriter, r *http.Request) {
 		dir, file, err := m.FilePath(r.PathValue("id"))
 		if err == nil {

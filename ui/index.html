@@ -7,19 +7,86 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%233b82f6'/%3E%3Cpath d='M32 14v26m-11-11 11 11 11-11M18 48h28' stroke='white' stroke-width='6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <style>
   :root {
-    --bg: #14161b; --panel: #1c1f26; --panel2: #232733; --line: #2e3340;
+    color-scheme: light;
+    --bg: #e6e9ee; --panel: #ffffff; --panel2: #eef0f3; --line: rgba(20,30,50,.10);
+    --text: #1a1d21; --muted: #5b6370; --accent: #2f6fed; --accent2: #1f55c4;
+    --ok: #1f9d62; --warn: #b45a12; --bad: #c0392b;
+    --hover-bg: #e4e7ed; --hover-line: rgba(20,30,50,.28);
+    --danger-hover: #9b2c20;
+    --shade: rgba(20,30,50,.12);
+    --offline-bg: #fdecea; --offline-fg: #9b2c20;
+    --banner-bg: #e6eefd; --banner-fg: #1f55c4; --banner-line: #c5d8fb;
+    --banner-err-bg: #fdecea; --banner-err-fg: #9b2c20; --banner-err-line: #f5c2c0;
+    --badge-dl-fg: #1f55c4; --badge-dl-bg: #e6eefd; --badge-dl-bd: #c5d8fb;
+    --badge-ok-fg: #167a4c; --badge-ok-bg: #e3f5ec; --badge-ok-bd: #b7e3cc;
+    --badge-err-fg: #9b2c20; --badge-err-bg: #fdecea; --badge-err-bd: #f5c2c0;
+    --badge-vo-fg: #5b43c7; --badge-vo-bg: #ece8fb; --badge-vo-bd: #d5cef5;
+    --badge-pause-fg: #b45a12; --badge-pause-bg: #fdeede; --badge-pause-bd: #f5d3a8;
+    --msg-err: #9b2c20; --msg-ok: #167a4c; --msg-net: #b45a12;
+    --group-line: #d5dbe6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --bg: #14161b; --panel: #1c1f26; --panel2: #232733; --line: #2e3340;
+      --text: #e6e8ee; --muted: #8b93a7; --accent: #3b82f6; --accent2: #2563eb;
+      --ok: #22c55e; --warn: #f59e0b; --bad: #ef4444;
+      --hover-bg: #2a2f3d; --hover-line: #49506a;
+      --danger-hover: #fca5a5;
+      --shade: rgba(0,0,0,.35);
+      --offline-bg: #450a0a; --offline-fg: #fecaca;
+      --banner-bg: #172554; --banner-fg: #93c5fd; --banner-line: #1e3a8a;
+      --banner-err-bg: #450a0a; --banner-err-fg: #fecaca; --banner-err-line: #7f1d1d;
+      --badge-dl-fg: #93c5fd; --badge-dl-bg: #172554; --badge-dl-bd: #1e3a8a;
+      --badge-ok-fg: #86efac; --badge-ok-bg: #052e16; --badge-ok-bd: #14532d;
+      --badge-err-fg: #fca5a5; --badge-err-bg: #450a0a; --badge-err-bd: #7f1d1d;
+      --badge-vo-fg: #c4b5fd; --badge-vo-bg: #1e1036; --badge-vo-bd: #4c1d95;
+      --badge-pause-fg: #fcd34d; --badge-pause-bg: #2b1a05; --badge-pause-bd: #78350f;
+      --msg-err: #fca5a5; --msg-ok: #86efac; --msg-net: #fcd34d;
+      --group-line: #33405c;
+    }
+  }
+  html[data-scheme="light"] { color-scheme: light;     --bg: #e6e9ee; --panel: #ffffff; --panel2: #eef0f3; --line: rgba(20,30,50,.10);
+    --text: #1a1d21; --muted: #5b6370; --accent: #2f6fed; --accent2: #1f55c4;
+    --ok: #1f9d62; --warn: #b45a12; --bad: #c0392b;
+    --hover-bg: #e4e7ed; --hover-line: rgba(20,30,50,.28);
+    --danger-hover: #9b2c20;
+    --shade: rgba(20,30,50,.12);
+    --offline-bg: #fdecea; --offline-fg: #9b2c20;
+    --banner-bg: #e6eefd; --banner-fg: #1f55c4; --banner-line: #c5d8fb;
+    --banner-err-bg: #fdecea; --banner-err-fg: #9b2c20; --banner-err-line: #f5c2c0;
+    --badge-dl-fg: #1f55c4; --badge-dl-bg: #e6eefd; --badge-dl-bd: #c5d8fb;
+    --badge-ok-fg: #167a4c; --badge-ok-bg: #e3f5ec; --badge-ok-bd: #b7e3cc;
+    --badge-err-fg: #9b2c20; --badge-err-bg: #fdecea; --badge-err-bd: #f5c2c0;
+    --badge-vo-fg: #5b43c7; --badge-vo-bg: #ece8fb; --badge-vo-bd: #d5cef5;
+    --badge-pause-fg: #b45a12; --badge-pause-bg: #fdeede; --badge-pause-bd: #f5d3a8;
+    --msg-err: #9b2c20; --msg-ok: #167a4c; --msg-net: #b45a12;
+    --group-line: #d5dbe6; }
+  html[data-scheme="dark"] { color-scheme: dark;     --bg: #14161b; --panel: #1c1f26; --panel2: #232733; --line: #2e3340;
     --text: #e6e8ee; --muted: #8b93a7; --accent: #3b82f6; --accent2: #2563eb;
     --ok: #22c55e; --warn: #f59e0b; --bad: #ef4444;
-  }
+    --hover-bg: #2a2f3d; --hover-line: #49506a;
+    --danger-hover: #fca5a5;
+    --shade: rgba(0,0,0,.35);
+    --offline-bg: #450a0a; --offline-fg: #fecaca;
+    --banner-bg: #172554; --banner-fg: #93c5fd; --banner-line: #1e3a8a;
+    --banner-err-bg: #450a0a; --banner-err-fg: #fecaca; --banner-err-line: #7f1d1d;
+    --badge-dl-fg: #93c5fd; --badge-dl-bg: #172554; --badge-dl-bd: #1e3a8a;
+    --badge-ok-fg: #86efac; --badge-ok-bg: #052e16; --badge-ok-bd: #14532d;
+    --badge-err-fg: #fca5a5; --badge-err-bg: #450a0a; --badge-err-bd: #7f1d1d;
+    --badge-vo-fg: #c4b5fd; --badge-vo-bg: #1e1036; --badge-vo-bd: #4c1d95;
+    --badge-pause-fg: #fcd34d; --badge-pause-bg: #2b1a05; --badge-pause-bd: #78350f;
+    --msg-err: #fca5a5; --msg-ok: #86efac; --msg-net: #fcd34d;
+    --group-line: #33405c; }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; }
   body { background: var(--bg); color: var(--text); font: 14px/1.4 "Segoe UI", system-ui, -apple-system, sans-serif; display: flex; flex-direction: column; }
   button { font: inherit; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
-  button:hover { border-color: #49506a; background: #2a2f3d; }
+  button:hover { border-color: var(--hover-line); background: var(--hover-bg); }
   button:disabled { opacity: .45; cursor: default; }
   button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
   button.primary:hover { background: var(--accent2); }
-  button.danger:hover { border-color: var(--bad); color: #fca5a5; }
+  button.danger:hover { border-color: var(--bad); color: var(--danger-hover); }
   button.small { padding: 4px 10px; font-size: 13px; }
   select { font: inherit; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; outline: none; }
   input[type=text], input[type=number], input[type=search] { font: inherit; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 9px 12px; outline: none; }
@@ -43,15 +110,15 @@
   .row1 { display: flex; align-items: center; gap: 10px; }
   .name { font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .badge { font-size: 12px; padding: 2px 9px; border-radius: 99px; background: var(--panel2); color: var(--muted); border: 1px solid var(--line); white-space: nowrap; }
-  .badge.Downloading { color: #93c5fd; border-color: #1e3a8a; background: #172554; }
-  .badge.Done { color: #86efac; border-color: #14532d; background: #052e16; }
-  .badge.Error { color: #fca5a5; border-color: #7f1d1d; background: #450a0a; }
-  .badge.ViewOnly { color: #c4b5fd; border-color: #4c1d95; background: #1e1036; }
+  .badge.Downloading { color: var(--badge-dl-fg); border-color: var(--badge-dl-bd); background: var(--badge-dl-bg); }
+  .badge.Done { color: var(--badge-ok-fg); border-color: var(--badge-ok-bd); background: var(--badge-ok-bg); }
+  .badge.Error { color: var(--badge-err-fg); border-color: var(--badge-err-bd); background: var(--badge-err-bg); }
+  .badge.ViewOnly { color: var(--badge-vo-fg); border-color: var(--badge-vo-bd); background: var(--badge-vo-bg); }
   .subhead { display: flex; align-items: center; gap: 8px; padding: 6px 4px; color: var(--text); font-weight: 600; cursor: pointer; user-select: none; }
   .subhead .count { font-weight: 400; }
   .subhead .arrow { color: var(--muted); width: 12px; display: inline-block; }
-  .badge.Paused { color: #fcd34d; border-color: #78350f; background: #2b1a05; }
-  .badge.Seeding { color: #86efac; border-color: #14532d; background: #052e16; }
+  .badge.Paused { color: var(--badge-pause-fg); border-color: var(--badge-pause-bd); background: var(--badge-pause-bg); }
+  .badge.Seeding { color: var(--badge-ok-fg); border-color: var(--badge-ok-bd); background: var(--badge-ok-bg); }
   .bar { height: 6px; background: var(--panel2); border-radius: 99px; overflow: hidden; margin: 10px 0 8px; }
   .bar > div { height: 100%; width: 0; background: var(--accent); border-radius: 99px; transition: width .4s; }
   .bar.Done > div, .bar.Seeding > div { background: var(--ok); }
@@ -63,11 +130,11 @@
   .row2 .stats { display: flex; gap: 16px; flex: 1; flex-wrap: wrap; }
   .row2 .actions { display: flex; gap: 6px; }
   .msg { color: var(--muted); font-size: 12px; margin-top: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .msg.err { color: #fca5a5; white-space: normal; }
+  .msg.err { color: var(--msg-err); white-space: normal; }
   .msg .fix { display: block; color: var(--text); opacity: .85; margin-top: 3px; }
   .msg .details { display: block; opacity: .6; font-size: 11px; margin-top: 3px; cursor: help; }
-  .msg.ok { color: #86efac; }
-  .msg.net { color: #fcd34d; white-space: normal; }
+  .msg.ok { color: var(--msg-ok); }
+  .msg.net { color: var(--msg-net); white-space: normal; }
   .morebox { display: flex; flex-direction: column; gap: 6px; margin: -6px 0 14px; font-size: 12px; color: var(--muted); }
   .morebox[hidden] { display: none !important; }
   .morebox textarea, .morebox input { width: 100%; box-sizing: border-box; font: 13px/1.4 Consolas, monospace; }
@@ -106,7 +173,7 @@
   .toast b { display: block; margin-bottom: 2px; }
   .toast span { color: var(--muted); font-size: 13px; word-break: break-word; }
   @keyframes pop { from { transform: translateY(10px); opacity: 0; } }
-  .item.group { border-color: #33405c; }
+  .item.group { border-color: var(--group-line); }
   .group .name .ficon { display: inline-block; width: 18px; height: 14px; margin-right: 8px; vertical-align: -1px; background: #f5c451; border-radius: 2px 3px 3px 3px; position: relative; }
   .group .name .ficon::before { content: ""; position: absolute; left: 0; top: -3px; width: 8px; height: 4px; background: #f5c451; border-radius: 2px 2px 0 0; }
   .count { color: var(--muted); font-size: 13px; white-space: nowrap; }
@@ -117,13 +184,27 @@
   .children .item { padding: 8px 10px; margin-bottom: 6px; background: var(--panel2); }
   .children .bar { margin: 6px 0 5px; height: 4px; }
   .toast .times { color: var(--muted); font-weight: 400; margin-left: 6px; }
-  #offline { display: none; background: #450a0a; color: #fecaca; padding: 8px 20px; text-align: center; }
+  #offline { display: none; background: var(--offline-bg); color: var(--offline-fg); padding: 8px 20px; text-align: center; }
   #offline.show { display: block; }
-  #updateBanner { display: none; align-items: center; justify-content: center; gap: 16px; flex-wrap: wrap; background: #172554; color: #93c5fd; padding: 8px 20px; border-bottom: 1px solid #1e3a8a; }
+  #updateBanner { display: none; align-items: center; justify-content: center; gap: 16px; flex-wrap: wrap; background: var(--banner-bg); color: var(--banner-fg); padding: 8px 20px; border-bottom: 1px solid var(--banner-line); }
   #updateBanner.show { display: flex; }
-  #updateBanner.error { background: #450a0a; color: #fecaca; border-bottom-color: #7f1d1d; }
+  #updateBanner.error { background: var(--banner-err-bg); color: var(--banner-err-fg); border-bottom-color: var(--banner-err-line); }
   #updateBanner .ubtns { display: flex; gap: 8px; }
   #updateBanner .bar { margin: 0; width: 180px; }
+  input[type=range] { accent-color: var(--accent); width: 100%; height: 22px; margin: 0; }
+  .speed-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+  .srow { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; border-top: 1px solid var(--line); }
+  .srow > span { font-weight: 500; }
+  .sctrl { display: flex; align-items: center; gap: 10px; width: 240px; flex: none; }
+  .slbl { min-width: 72px; text-align: right; color: var(--muted); font-size: 13px; }
+  button.limit.on { border-color: var(--accent); color: var(--accent); }
+  .popover { position: fixed; z-index: 15; background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 14px; width: 240px; box-shadow: 0 12px 32px var(--shade); }
+  .popover .poptitle { font-size: 13px; font-weight: 600; margin: 0 0 4px; }
+  .popover .meta { font-size: 12px; color: var(--muted); margin: 0 0 10px; }
+  .popover .meta.lab { margin: 0 0 4px; }
+  .popover .sctrl { width: 100%; margin-bottom: 10px; }
+  .popover .slbl { min-width: 64px; }
+  .popover .popbtns { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
 </style>
 </head>
 <body>
@@ -194,7 +275,17 @@
         <input id="setActive" type="number" min="1" max="10">
         <div class="hint">Extra downloads wait in the queue (1-10) and start by themselves when a place is free. Use the arrows on a waiting download to change the order.</div>
       </div>
-      <div class="field check">
+      <div class="field" style="margin-bottom:4px">
+        <div class="speed-head">
+          <label style="margin:0">Speed limits</label>
+          <button type="button" id="resetLimits" class="small">Reset</button>
+        </div>
+        <div class="hint">These limits apply to every download of that kind. You can set a different limit on one download from the list.</div>
+      </div>
+      <div class="srow"><span>Regular downloads</span><div class="sctrl"><input id="limHTTP" type="range" min="0" max="10" step="1" value="10"><span id="limHTTPLbl" class="slbl">Unlimited</span></div></div>
+      <div class="srow"><span>Torrent download</span><div class="sctrl"><input id="limTorDown" type="range" min="0" max="10" step="1" value="10"><span id="limTorDownLbl" class="slbl">Unlimited</span></div></div>
+      <div class="srow"><span>Torrent upload</span><div class="sctrl"><input id="limTorUp" type="range" min="0" max="10" step="1" value="10"><span id="limTorUpLbl" class="slbl">Unlimited</span></div></div>
+      <div class="field check" style="margin-top:14px">
         <input id="setNotify" type="checkbox"><label for="setNotify" style="margin:0">Show Windows notifications</label>
       </div>
       <div class="field check">
@@ -271,6 +362,17 @@
   </div>
 </div>
 
+<div id="speedPop" class="popover" hidden>
+  <p class="poptitle">Speed limit</p>
+  <p class="meta">This download only</p>
+  <p class="meta lab">Download</p>
+  <div class="sctrl"><input id="popDl" type="range" min="0" max="10" step="1" value="10"><span id="popDlLbl" class="slbl">Unlimited</span></div>
+  <div id="popUpRow">
+    <p class="meta lab">Upload</p>
+    <div class="sctrl"><input id="popUl" type="range" min="0" max="10" step="1" value="10"><span id="popUlLbl" class="slbl">Unlimited</span></div>
+  </div>
+  <div class="popbtns"><button id="popOff" class="small">Off</button><button id="popApply" class="small primary">Apply</button></div>
+</div>
 <div id="toasts"></div>
 
 <script>
@@ -288,6 +390,29 @@ function fmtSize(n, zero) {
   return n.toFixed(i === 0 ? 0 : 1) + " " + u[i];
 }
 function fmtSpeed(b) { return b > 0 ? fmtSize(b) + "/s" : "-"; }
+const SPEED_STEPS = [25*1024, 50*1024, 100*1024, 200*1024, 2*1024*1024, 5*1024*1024, 10*1024*1024, 20*1024*1024, 50*1024*1024, 100*1024*1024];
+function speedBPS(i) { i = +i; return (i < 0 ? 0 : i >= 10 ? 0 : SPEED_STEPS[i]); }
+function speedIndex(bps) {
+  if (!bps || bps <= 0) return 10;
+  let best = 0, diff = Math.abs(SPEED_STEPS[0] - bps);
+  for (let i = 1; i < SPEED_STEPS.length; i++) {
+    const d = Math.abs(SPEED_STEPS[i] - bps);
+    if (d < diff) { best = i; diff = d; }
+  }
+  return best;
+}
+function formatSpeedLimit(bps) {
+  if (!bps || bps <= 0) return "Unlimited";
+  if (bps % (1024*1024) === 0) return (bps / (1024*1024)) + " MB/s";
+  if (bps % 1024 === 0) return (bps / 1024) + " KB/s";
+  return fmtSize(bps) + "/s";
+}
+function bindLimitSlider(input, label) {
+  const upd = () => { label.textContent = formatSpeedLimit(speedBPS(input.value)); };
+  input.addEventListener("input", upd);
+  upd();
+  return upd;
+}
 function fmtETA(s) {
   if (s < 0) return "-";
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
@@ -444,7 +569,10 @@ function makeRow(j) {
   r._up.title = "Move up in the queue";
   r._down = el("button", "small", "\u2193");
   r._down.title = "Move down in the queue";
-  actions.append(r._first, r._up, r._down, r._pause, r._resume, r._open, r._del);
+  r._limit = el("button", "small", "Speed limit");
+  r._limit.title = "Set a speed limit for this download only";
+  actions.append(r._first, r._up, r._down, r._pause, r._resume, r._limit, r._open, r._del);
+
   row2.append(stats, actions);
   r._msg = el("div", "msg");
   r.append(row1, r._bar, row2, r._msg);
@@ -467,7 +595,10 @@ function makeRow(j) {
 }
 
 function updateRow(r, j) {
+  r._limit.onclick = (ev) => { ev.stopPropagation(); openSpeedPop(r, r._limit); };
   r._kind = j.kind;
+  r._dlLimit = j.dlLimit;
+  r._ulLimit = j.ulLimit;
   r._name.textContent = (j.kind === "video" ? "\u25B6 " : "") + j.name;
   r._name.title = j.url;
   const label = j.viewOnly ? "View only" : j.status;
@@ -499,6 +630,10 @@ function updateRow(r, j) {
   else r._eta.textContent = "";
   r._pause.hidden = !(j.status === "Downloading" || j.status === "Queued" || seeding);
   r._resume.hidden = !(j.status === "Paused" || (j.status === "Error" && !j.viewOnly));
+  const showLimit = !j.viewOnly && j.status !== "Done" && (j.status === "Downloading" || j.status === "Queued" || j.status === "Paused" || j.status === "Error" || seeding);
+  r._limit.hidden = !showLimit;
+  r._limit.classList.toggle("limit", true);
+  r._limit.classList.toggle("on", j.dlLimit != null || (j.kind === "torrent" && j.ulLimit != null));
   r._resume.textContent = j.status === "Error" ? "Retry" : "Resume";
   const queued = j.status === "Queued";
   r._first.hidden = !queued || j.queuePos <= 1;
@@ -789,6 +924,12 @@ async function loadSettings() {
   $("setDir").value = s.downloadDir;
   $("setParts").value = s.parts;
   $("setActive").value = s.maxActive;
+  $("limHTTP").value = speedIndex(s.httpDownloadLimit);
+  $("limTorDown").value = speedIndex(s.torrentDownloadLimit);
+  $("limTorUp").value = speedIndex(s.torrentUploadLimit);
+  $("limHTTP").dispatchEvent(new Event("input"));
+  $("limTorDown").dispatchEvent(new Event("input"));
+  $("limTorUp").dispatchEvent(new Event("input"));
   $("setNotify").checked = s.notifications;
   $("setAsk").checked = s.askCaptured;
   $("setCookies").value = s.cookiesBrowser || "";
@@ -855,12 +996,21 @@ $("saveSettings").onclick = async () => {
     const s = await api("/api/settings", {
       downloadDir: $("setDir").value, parts: parseInt($("setParts").value, 10) || 8,
       maxActive: parseInt($("setActive").value, 10) || 3, notifications: $("setNotify").checked,
+      httpDownloadLimit: speedBPS($("limHTTP").value),
+      torrentDownloadLimit: speedBPS($("limTorDown").value),
+      torrentUploadLimit: speedBPS($("limTorUp").value),
       askCaptured: $("setAsk").checked, cookiesBrowser: $("setCookies").value,
       startWithWindows: $("setAutostart").checked, resumeOnStart: $("setResume").checked,
       checkUpdates: $("setCheckUpdates").checked,
     });
     $("setDir").value = s.downloadDir; $("setParts").value = s.parts; $("setActive").value = s.maxActive;
-    toast("Settings saved", "New downloads will use these settings.", "ok");
+    $("limHTTP").value = speedIndex(s.httpDownloadLimit);
+    $("limTorDown").value = speedIndex(s.torrentDownloadLimit);
+    $("limTorUp").value = speedIndex(s.torrentUploadLimit);
+    $("limHTTP").dispatchEvent(new Event("input"));
+    $("limTorDown").dispatchEvent(new Event("input"));
+    $("limTorUp").dispatchEvent(new Event("input"));
+    toast("Settings saved", "Speed limits apply at once to running downloads.", "ok");
   } catch (e) { toast("Could not save settings", e.message, "bad"); }
 };
 $("setCookies").onchange = async () => {
@@ -941,6 +1091,67 @@ $("checkUpdatesBtn").onclick = async () => {
 setInterval(refreshUpdate, 1000);
 refreshUpdate();
 
+// ---------- speed limits ----------
+bindLimitSlider($("limHTTP"), $("limHTTPLbl"));
+bindLimitSlider($("limTorDown"), $("limTorDownLbl"));
+bindLimitSlider($("limTorUp"), $("limTorUpLbl"));
+bindLimitSlider($("popDl"), $("popDlLbl"));
+bindLimitSlider($("popUl"), $("popUlLbl"));
+$("resetLimits").onclick = () => {
+  for (const id of ["limHTTP", "limTorDown", "limTorUp"]) {
+    $(id).value = 10;
+    $(id).dispatchEvent(new Event("input"));
+  }
+};
+
+let speedPopId = "";
+function closeSpeedPop() {
+  $("speedPop").hidden = true;
+  speedPopId = "";
+}
+function openSpeedPop(row, btn) {
+  const pop = $("speedPop");
+  const torrent = row._kind === "torrent";
+  speedPopId = row._jobId;
+  $("popUpRow").hidden = !torrent;
+  $("popDl").value = speedIndex(row._dlLimit);
+  $("popUl").value = speedIndex(row._ulLimit);
+  $("popDl").dispatchEvent(new Event("input"));
+  $("popUl").dispatchEvent(new Event("input"));
+  pop.hidden = false;
+  const r = btn.getBoundingClientRect();
+  const w = pop.offsetWidth, h = pop.offsetHeight;
+  let left = r.right - w;
+  let top = r.bottom + 6;
+  if (left < 8) left = 8;
+  if (left + w > window.innerWidth - 8) left = window.innerWidth - w - 8;
+  if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 6);
+  pop.style.left = left + "px";
+  pop.style.top = top + "px";
+}
+$("popOff").onclick = async () => {
+  const id = speedPopId;
+  closeSpeedPop();
+  if (!id) return;
+  try { await api("/api/jobs/" + id + "/speedlimit", { off: true }); refresh(); }
+  catch (e) { toast("Could not change the speed limit", e.message, "bad"); }
+};
+$("popApply").onclick = async () => {
+  const id = speedPopId;
+  const body = { dlLimit: speedBPS($("popDl").value) };
+  if (!$("popUpRow").hidden) body.ulLimit = speedBPS($("popUl").value);
+  closeSpeedPop();
+  if (!id) return;
+  try { await api("/api/jobs/" + id + "/speedlimit", body); refresh(); }
+  catch (e) { toast("Could not change the speed limit", e.message, "bad"); }
+};
+document.addEventListener("mousedown", (e) => {
+  const pop = $("speedPop");
+  if (pop.hidden) return;
+  if (pop.contains(e.target) || (e.target.closest && e.target.closest("button.limit"))) return;
+  closeSpeedPop();
+});
+
 // ---------- quit ----------
 $("quitBtn").onclick = async () => {
   const a = await confirmBox("Quit BDDM", "Running downloads will be paused and saved. You can resume them next time.", "Quit");
@@ -953,8 +1164,35 @@ $("quitBtn").onclick = async () => {
 
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && $("dlgConfirm").classList.contains("show")) $("cNo").click();
+  if (e.key === "Escape" && !$("speedPop").hidden) closeSpeedPop();
 });
 $("url").focus();
+(function () {
+  const q = new URLSearchParams(location.search);
+  const scheme = q.get("scheme");
+  if (scheme === "dark" || scheme === "light") document.documentElement.dataset.scheme = scheme;
+  if (q.get("tab") === "settings") {
+    const btn = document.querySelector('[data-tab="settings"]');
+    if (btn) btn.click();
+  }
+  const id = q.get("speedlimit");
+  if (id) {
+    const open = () => {
+      const rows = document.querySelectorAll("#list .item");
+      for (const r of rows) {
+        if (r._jobId === id && r._limit && !r._limit.hidden) {
+          openSpeedPop(r, r._limit);
+          return true;
+        }
+      }
+      return false;
+    };
+    const t0 = Date.now();
+    const timer = setInterval(() => {
+      if (open() || Date.now() - t0 > 4000) clearInterval(timer);
+    }, 50);
+  }
+})();
 </script>
 </body>
 </html>

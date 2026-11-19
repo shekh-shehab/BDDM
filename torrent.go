@@ -213,6 +213,12 @@ func (m *Manager) newTorrentConfig() *torrent.ClientConfig {
 	if p := m.readTorrentPort(); p != 0 {
 		cfg.ListenPort = p
 	}
+	if m.torDownLim != nil {
+		cfg.DownloadRateLimiter = m.torDownLim
+	}
+	if m.torUpLim != nil {
+		cfg.UploadRateLimiter = m.torUpLim
+	}
 	if m.tLoopback || testTorrentLoopback {
 		m.tLoopback = true
 		cfg.ListenHost = func(string) string { return "127.0.0.1" }
@@ -716,12 +722,22 @@ func (m *Manager) runTorrent(j *Job, ctx context.Context) {
 
 	tick := time.NewTicker(time.Second)
 	defer tick.Stop()
+	paceTick := time.NewTicker(100 * time.Millisecond)
+	defer paceTick.Stop()
 	var lastDone, lastUp int64
 	lastT := time.Now()
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-paceTick.C:
+			m.mu.Lock()
+			th := j.th
+			m.mu.Unlock()
+			if th != nil && th.Info() != nil {
+				st := th.Stats()
+				m.paceTorrent(j, th.BytesCompleted(), st.BytesWrittenData.Int64())
+			}
 		case <-tick.C:
 			m.mu.Lock()
 			th := j.th
@@ -751,6 +767,7 @@ func (m *Manager) runTorrent(j *Job, ctx context.Context) {
 				}
 			}
 			lastDone, lastUp, lastT = done, uploaded, now
+			m.paceTorrent(j, done, uploaded)
 
 			m.mu.Lock()
 			if j.th != th {
