@@ -34,6 +34,14 @@ func hideConsole(cmd *exec.Cmd) {
 
 // runPowerShell runs a script with Windows PowerShell 5.1 (built into Windows).
 func runPowerShell(script string, timeout time.Duration) (string, error) {
+	return runPowerShellStart(script, timeout, false)
+}
+
+func runPowerShellDialog(script string, timeout time.Duration) (string, error) {
+	return runPowerShellStart(script, timeout, true)
+}
+
+func runPowerShellStart(script string, timeout time.Duration, foreground bool) (string, error) {
 	// -EncodedCommand takes UTF-16LE base64, so we never fight with quoting.
 	u := utf16.Encode([]rune(script))
 	b := make([]byte, len(u)*2)
@@ -46,7 +54,16 @@ func runPowerShell(script string, timeout time.Duration) (string, error) {
 	hideConsole(cmd)
 	var out strings.Builder
 	cmd.Stdout = &out
-	if err := cmd.Start(); err != nil {
+	var err error
+	if foreground {
+		withForeground(func() { err = cmd.Start() })
+		if cmd.Process != nil {
+			allowSetForegroundWindow(uint32(cmd.Process.Pid))
+		}
+	} else {
+		err = cmd.Start()
+	}
+	if err != nil {
 		return "", err
 	}
 	done := make(chan error, 1)
@@ -111,7 +128,12 @@ func runSilentSetup(path string) error {
 	}
 	cmd := exec.Command(path, "/S", "/run")
 	hideConsole(cmd)
-	return cmd.Start()
+	var err error
+	withForeground(func() { err = cmd.Start() })
+	if err == nil && cmd.Process != nil {
+		allowSetForegroundWindow(uint32(cmd.Process.Pid))
+	}
+	return err
 }
 
 // openURL opens an http(s) address in the default browser.
@@ -119,8 +141,17 @@ func openURL(raw string) error {
 	if err := validWebURL(raw); err != nil {
 		return err
 	}
-	cmd := exec.Command("rundll32", "url.dll,FileProtocolHandler", raw)
-	return cmd.Start()
+	before := snapshotHWND()
+	var err error
+	withForeground(func() {
+		cmd := exec.Command("rundll32", "url.dll,FileProtocolHandler", raw)
+		err = cmd.Start()
+	})
+	if err != nil {
+		return err
+	}
+	go activateNewWindows(before, isNewBrowserWindow, 3*time.Second)
+	return nil
 }
 
 // openFolder opens Explorer at dir, selecting file when given.
@@ -133,14 +164,84 @@ func openFolder(dir, file string) error {
 	} else {
 		cmd = exec.Command("explorer.exe", dir)
 	}
-	return cmd.Start() // explorer often returns exit code 1, so don't wait
+	before := snapshotHWND()
+	var err error
+	withForeground(func() {
+		err = cmd.Start() // explorer often returns exit code 1, so don't wait
+	})
+	if err != nil {
+		return err
+	}
+	go activateNewWindows(before, func(w enumWnd) bool { return isExplorerClass(w.class) }, 3*time.Second)
+	return nil
 }
 
-// pickFolder shows the Windows "Browse For Folder" dialog. Returns "" if cancelled.
+// pickFolder shows the Windows folder dialog, owned by the BDDM window so
+// it appears in front. Returns "" if cancelled.
 func pickFolder(start string) (string, error) {
-	script := `
+	owner := dialogOwnerHWND()
+	path, err := pickFolderNative(owner, start)
+	if err == nil {
+		return path, nil
+	}
+	log.Printf("native folder picker failed (%v); trying the fallback dialog", err)
+	return pickFolderPowerShell(owner, start)
+}
+
+// pickTorrentFile shows the Windows "Open" dialog for a .torrent file,
+// owned by the BDDM window so it appears in front. Returns "" if cancelled.
+func pickTorrentFile() (string, error) {
+	owner := dialogOwnerHWND()
+	path, err := pickTorrentFileNative(owner, "")
+	if err == nil {
+		return path, nil
+	}
+	log.Printf("native file picker failed (%v); trying the fallback dialog", err)
+	return pickTorrentFilePowerShell(owner)
+}
+
+func powershellDialogOwner(hwnd uintptr) string {
+	// A hidden TopMost form is not enough: the dialog is then owned by that
+	// form, not by the Edge window, so it stays behind the BDDM UI. When we
+	// have the real HWND we wrap it as IWin32Window.
+	if hwnd == 0 {
+		return `
+$owner = New-Object System.Windows.Forms.Form -Property @{TopMost = $true; ShowInTaskbar = $false; Visible = $false}
+$owner.Show(); $owner.Hide()
+[WinFocus]::AllowSetForegroundWindow(-1)
+[void][WinFocus]::SetWindowPos($owner.Handle, [IntPtr](-1), 0,0,0,0, 0x0003)
+`
+	}
+	return `
+$hwnd = [IntPtr]` + fmt.Sprintf("%d", hwnd) + `
+$owner = New-Object HwndOwner ($hwnd.ToInt64())
+[WinFocus]::AllowSetForegroundWindow(-1)
+[WinFocus]::ShowWindow($hwnd, 9)
+[void][WinFocus]::SetForegroundWindow($hwnd)
+`
+}
+
+const powershellDialogPrelude = `
 Add-Type -AssemblyName System.Windows.Forms
-$owner = New-Object System.Windows.Forms.Form -Property @{TopMost = $true; ShowInTaskbar = $false}
+Add-Type -TypeDefinition @"
+using System;
+using System.Windows.Forms;
+using System.Runtime.InteropServices;
+public class HwndOwner : IWin32Window {
+  public HwndOwner(long h) { Handle = (IntPtr)h; }
+  public IntPtr Handle { get; }
+}
+public class WinFocus {
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int n);
+  [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr i, int x, int y, int cx, int cy, uint f);
+  [DllImport("user32.dll")] public static extern bool AllowSetForegroundWindow(int pid);
+}
+"@
+`
+
+func pickFolderPowerShell(hwnd uintptr, start string) (string, error) {
+	script := powershellDialogPrelude + powershellDialogOwner(hwnd) + `
 $d = New-Object System.Windows.Forms.FolderBrowserDialog
 $d.Description = 'Choose the folder for downloads'
 $d.SelectedPath = ` + psQuote(start) + `
@@ -150,19 +251,15 @@ if ($d.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) {
   Write-Output $d.SelectedPath
 }
 `
-	out, err := runPowerShell(script, 10*time.Minute)
+	out, err := runPowerShellDialog(script, 10*time.Minute)
 	if err != nil {
 		return "", err
 	}
 	return strings.TrimSpace(out), nil
 }
 
-// pickTorrentFile shows the Windows "Open" dialog for a .torrent file.
-// Returns "" if cancelled.
-func pickTorrentFile() (string, error) {
-	script := `
-Add-Type -AssemblyName System.Windows.Forms
-$owner = New-Object System.Windows.Forms.Form -Property @{TopMost = $true; ShowInTaskbar = $false}
+func pickTorrentFilePowerShell(hwnd uintptr) (string, error) {
+	script := powershellDialogPrelude + powershellDialogOwner(hwnd) + `
 $d = New-Object System.Windows.Forms.OpenFileDialog
 $d.Title = 'Add torrent'
 $d.Filter = 'Torrent files (*.torrent)|*.torrent|All files (*.*)|*.*'
@@ -172,7 +269,7 @@ if ($d.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) {
   Write-Output $d.FileName
 }
 `
-	out, err := runPowerShell(script, 10*time.Minute)
+	out, err := runPowerShellDialog(script, 10*time.Minute)
 	if err != nil {
 		return "", err
 	}
@@ -183,8 +280,13 @@ if ($d.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) {
 // default browser.
 func openAppWindow(u string) error { return openAppWindowSize(u, 1100, 720) }
 
-// openAppWindowSize opens u in an Edge (or Chrome) app window of w x h pixels.
+// openAppWindowSize opens u in an Edge (or Chrome) app window of w x h pixels
+// and brings that window to the front. If the main window is already open,
+// it is reused and brought to the front instead of starting a second one.
 func openAppWindowSize(u string, w, h int) error {
+	if isMainAppURL(u) && focusExistingMainWindow() {
+		return nil
+	}
 	args := []string{"--app=" + u, fmt.Sprintf("--window-size=%d,%d", w, h)}
 	var candidates []string
 	for _, env := range []string{"ProgramFiles(x86)", "ProgramFiles", "LocalAppData"} {
@@ -198,21 +300,38 @@ func openAppWindowSize(u string, w, h int) error {
 			candidates = append(candidates, filepath.Join(base, "Google", "Chrome", "Application", "chrome.exe"))
 		}
 	}
+	before := snapshotHWND()
+	start := func(cmd *exec.Cmd) error {
+		var err error
+		withForeground(func() { err = cmd.Start() })
+		return err
+	}
 	for i, p := range candidates {
 		if i == edgeCount {
 			// Edge not found in the usual folders: let Windows find it.
 			cmd := exec.Command("cmd", append([]string{"/c", "start", "", "msedge"}, args...)...)
 			hideConsole(cmd)
-			if cmd.Run() == nil {
+			if start(cmd) == nil {
+				go focusOpenedWindow(u, before, 0)
 				return nil
 			}
 		}
 		if fileExists(p) {
-			if err := exec.Command(p, args...).Start(); err == nil {
+			cmd := exec.Command(p, args...)
+			if start(cmd) == nil {
+				pid := 0
+				if cmd.Process != nil {
+					pid = cmd.Process.Pid
+				}
+				go focusOpenedWindow(u, before, pid)
 				return nil
 			}
 		}
 	}
 	cmd := exec.Command("rundll32", "url.dll,FileProtocolHandler", u)
-	return cmd.Start()
+	if err := start(cmd); err != nil {
+		return err
+	}
+	go focusOpenedWindow(u, before, 0)
+	return nil
 }
