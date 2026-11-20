@@ -54,6 +54,7 @@ var (
 	procGetAncestor                = user32.NewProc("GetAncestor")
 	procGetWindowRect              = user32.NewProc("GetWindowRect")
 	procGetCurrentThreadId         = kernel32.NewProc("GetCurrentThreadId")
+	procGetCurrentProcessId        = kernel32.NewProc("GetCurrentProcessId")
 	procOpenProcess                = kernel32.NewProc("OpenProcess")
 	procCloseHandle                = kernel32.NewProc("CloseHandle")
 	procQueryFullProcessImageNameW = kernel32.NewProc("QueryFullProcessImageNameW")
@@ -63,11 +64,17 @@ type winRect struct{ left, top, right, bottom int32 }
 
 type enumWnd struct {
 	hwnd  uintptr
+	owner uintptr
 	title string
 	class string
 	pid   uint32
 	tid   uint32
 }
+
+const raiseDialogFor = 1500 * time.Millisecond
+
+var enumIncludeOwned bool
+var enumMinW, enumMinH int32 = 160, 80
 
 var enumMu sync.Mutex
 var enumBuf []enumWnd
@@ -75,15 +82,17 @@ var enumCallback = syscall.NewCallback(func(hwnd, lparam uintptr) uintptr {
 	if !isWindowVisible(hwnd) {
 		return 1
 	}
-	if getWindow(hwnd, gwOwner) != 0 {
+	owner := getWindow(hwnd, gwOwner)
+	if !enumIncludeOwned && owner != 0 {
 		return 1 // owned popups; we want top-level frames
 	}
-	if w, h := windowSize(hwnd); w < 160 || h < 80 {
+	if w, h := windowSize(hwnd); w < enumMinW || h < enumMinH {
 		return 1
 	}
 	tid, pid := windowThreadProcess(hwnd)
 	enumBuf = append(enumBuf, enumWnd{
 		hwnd:  hwnd,
+		owner: owner,
 		title: windowText(hwnd),
 		class: windowClass(hwnd),
 		pid:   pid,
@@ -92,14 +101,72 @@ var enumCallback = syscall.NewCallback(func(hwnd, lparam uintptr) uintptr {
 	return 1
 })
 
-func enumTopWindows() []enumWnd {
+func enumVisibleWindows(includeOwned bool, minW, minH int32) []enumWnd {
 	enumMu.Lock()
 	defer enumMu.Unlock()
+	enumIncludeOwned = includeOwned
+	enumMinW, enumMinH = minW, minH
 	enumBuf = nil
 	procEnumWindows.Call(enumCallback, 0)
 	out := make([]enumWnd, len(enumBuf))
 	copy(out, enumBuf)
 	return out
+}
+
+func enumTopWindows() []enumWnd {
+	return enumVisibleWindows(false, 160, 80)
+}
+
+func enumPickerWindows() []enumWnd {
+	return enumVisibleWindows(true, 80, 40)
+}
+
+func snapshotPickerHWND() map[uintptr]bool {
+	m := map[uintptr]bool{}
+	for _, w := range enumPickerWindows() {
+		m[w.hwnd] = true
+	}
+	return m
+}
+
+func getCurrentProcessId() uint32 {
+	r, _, _ := procGetCurrentProcessId.Call()
+	return uint32(r)
+}
+
+// raiseNewDialog looks for a folder or file picker that appeared after
+// Show started and brings that window (not its owner) to the front.
+// It retries for wait, then stops. A missing window is a no-op.
+func raiseNewDialog(before map[uintptr]bool, owner uintptr, dialogPID uint32, wait time.Duration) {
+	defer func() { recover() }()
+	if wait <= 0 {
+		wait = raiseDialogFor
+	}
+	if before == nil {
+		before = map[uintptr]bool{}
+	}
+	deadline := time.Now().Add(wait)
+	for {
+		for _, w := range enumPickerWindows() {
+			if !isCandidateFileDialog(w.class, w.title, w.hwnd, w.owner, owner, w.pid, dialogPID, before) {
+				continue
+			}
+			activateWindow(w.hwnd)
+			if getForegroundWindow() == w.hwnd {
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// watchFileDialog starts a short-lived watcher that raises the picker while
+// Show (or the PowerShell dialog) is blocked, then returns immediately.
+func watchFileDialog(before map[uintptr]bool, owner uintptr, dialogPID uint32) {
+	go raiseNewDialog(before, owner, dialogPID, raiseDialogFor)
 }
 
 func windowText(hwnd uintptr) string {

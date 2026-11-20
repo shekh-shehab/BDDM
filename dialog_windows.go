@@ -188,10 +188,13 @@ func showFileOpenDialog(owner uintptr, title, start string, folders bool, filter
 
 	var path string
 	var showErr error
+	// Do not activate the owner (the Edge/Chrome window) before or during
+	// Show: that can keep it on top of the dialog, which lives in this
+	// process, not in msedge.exe. Watch for the dialog's own HWND and
+	// raise that instead.
+	before := snapshotPickerHWND()
+	watchFileDialog(before, owner, getCurrentProcessId())
 	withForeground(func() {
-		if owner != 0 {
-			activateWindow(owner)
-		}
 		r := comCall(dlg, 3, owner) // IModalWindow::Show
 		if hresult(r) == hresultCancelled || hresult(r) == 0x800704C7 {
 			return

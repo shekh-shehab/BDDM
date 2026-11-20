@@ -74,3 +74,62 @@ func isChromeWidgetClass(class string) bool {
 func isExplorerClass(class string) bool {
 	return class == "CabinetWClass" || class == "ExploreWClass"
 }
+
+// dialogWindowClass is the standard class of a Windows folder or file picker
+// (#32770). IFileOpenDialog and the PowerShell WinForms dialogs use it.
+const dialogWindowClass = "#32770"
+
+// fileDialogTitles are the titles BDDM sets on its folder and torrent pickers,
+// plus the default title of the classic "Browse For Folder" dialog.
+var fileDialogTitles = []string{
+	"Choose the folder for downloads",
+	"Add torrent",
+	"Browse For Folder",
+}
+
+func isDialogClass(class string) bool {
+	return class == dialogWindowClass
+}
+
+func fileDialogTitleMatch(title string) bool {
+	t := strings.TrimSpace(title)
+	if t == "" {
+		return false
+	}
+	for _, want := range fileDialogTitles {
+		if t == want {
+			return true
+		}
+	}
+	return false
+}
+
+// isCandidateFileDialog reports whether a visible window is a folder or file
+// picker we just opened, and not the BDDM Edge/Chrome window that should
+// stay behind it. before lists HWNDs that already existed when Show started.
+// dialogPID is the process that creates the dialog (BDDM.exe, or powershell
+// for the fallback). expectedOwner is the BDDM app window, if any.
+func isCandidateFileDialog(class, title string, hwnd, winOwner, expectedOwner uintptr, pid, dialogPID uint32, before map[uintptr]bool) bool {
+	if hwnd == 0 || hwnd == expectedOwner {
+		return false
+	}
+	if before[hwnd] {
+		return false
+	}
+	if isChromeWidgetClass(class) || isExplorerClass(class) {
+		return false
+	}
+	byClass := isDialogClass(class)
+	byTitle := fileDialogTitleMatch(title)
+	if !byClass && !byTitle {
+		return false
+	}
+	if dialogPID != 0 && pid == dialogPID {
+		return true
+	}
+	if expectedOwner != 0 && winOwner == expectedOwner {
+		return true
+	}
+	// New picker with a title we set, even if the process id could not be read.
+	return byClass && byTitle
+}
