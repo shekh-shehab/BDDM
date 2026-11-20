@@ -105,6 +105,10 @@ type Settings struct {
 	HTTPDownloadLimit    int64 `json:"httpDownloadLimit"`
 	TorrentDownloadLimit int64 `json:"torrentDownloadLimit"`
 	TorrentUploadLimit   int64 `json:"torrentUploadLimit"`
+	// LastTorrentDir is the folder last chosen in the Add torrent window.
+	// It is pre-filled the next time. If it is missing, the usual default
+	// download folder is used instead.
+	LastTorrentDir string `json:"lastTorrentDir,omitempty"`
 }
 
 func defaultSettings() Settings {
@@ -143,12 +147,46 @@ func (s *Settings) fix() {
 	s.HTTPDownloadLimit = clampLimit(s.HTTPDownloadLimit)
 	s.TorrentDownloadLimit = clampLimit(s.TorrentDownloadLimit)
 	s.TorrentUploadLimit = clampLimit(s.TorrentUploadLimit)
+	s.LastTorrentDir = strings.TrimSpace(s.LastTorrentDir)
+	if s.LastTorrentDir != "" && !filepath.IsAbs(s.LastTorrentDir) {
+		s.LastTorrentDir = ""
+	}
 	s.Categories = fixCategories(s.Categories)
 	for i := range s.Categories {
 		if d := s.Categories[i].Dir; d != "" && (!filepath.IsAbs(d) || filepath.Clean(d) == filepath.Clean(s.DownloadDir)) {
 			s.Categories[i].Dir = "" // only full paths; the main folder is the default anyway
 		}
 	}
+}
+
+// existingAbsDir is an absolute folder that still exists on disk.
+func existingAbsDir(p string) string {
+	p = strings.TrimSpace(p)
+	if p == "" || !filepath.IsAbs(p) {
+		return ""
+	}
+	st, err := os.Stat(p)
+	if err != nil || !st.IsDir() {
+		return ""
+	}
+	return filepath.Clean(p)
+}
+
+// torrentSaveDir is the folder pre-filled in the Add torrent window: the last
+// folder the user chose, or the usual default if that folder is gone.
+func (s Settings) torrentSaveDir(name string, single bool) string {
+	if d := existingAbsDir(s.LastTorrentDir); d != "" {
+		return d
+	}
+	if single && name != "" {
+		if d := s.dirFor(name); d != "" {
+			return d
+		}
+	}
+	if s.DownloadDir != "" {
+		return s.DownloadDir
+	}
+	return defaultSettings().DownloadDir
 }
 
 // Job is one download. The exported fields are saved in history.json.

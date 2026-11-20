@@ -281,11 +281,8 @@ func applyTorrentMeta(j *Job, info *metainfo.Info, settings Settings) {
 	j.Torrent.Files = len(files)
 	j.Torrent.Single = !info.IsDir()
 	if j.Dir == "" {
-		if j.Torrent.Single {
-			j.Dir = settings.dirFor(j.Name)
-		} else {
-			j.Dir = settings.DownloadDir
-		}
+		single := j.Torrent != nil && j.Torrent.Single
+		j.Dir = settings.torrentSaveDir(j.Name, single)
 	}
 }
 
@@ -410,7 +407,7 @@ func (m *Manager) addTorrentPending(uri, hash, name string, info *metainfo.Info)
 		j.tReady = true
 		j.tFiles = torrentFileViews(info)
 	} else {
-		j.Dir = m.settings.DownloadDir
+		j.Dir = m.settings.torrentSaveDir(name, false)
 	}
 	m.jobs = append(m.jobs, j)
 	if info == nil && uri != "" {
@@ -515,7 +512,9 @@ func (m *Manager) TorrentPending(id string) (TorrentPendingView, error) {
 		Error: j.Error, Status: j.Status,
 	}
 	if v.Dir == "" {
-		v.Dir = m.settings.DownloadDir
+		name := j.Name
+		single := j.Torrent != nil && j.Torrent.Single
+		v.Dir = m.settings.torrentSaveDir(name, single)
 	}
 	return v, nil
 }
@@ -572,24 +571,28 @@ func (m *Manager) StartTorrent(id, dir string) (JobView, error) {
 		dir = j.Dir
 	}
 	if dir == "" {
-		dir = m.settings.DownloadDir
+		single := j.Torrent != nil && j.Torrent.Single
+		dir = m.settings.torrentSaveDir(j.Name, single)
 	}
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		m.mu.Unlock()
 		return JobView{}, fmt.Errorf("cannot use this folder: %w", err)
 	}
 	j.Dir = dir
+	m.settings.LastTorrentDir = dir
 	j.Error = ""
 	if err := m.startTorrentLocked(j); err != nil {
 		j.Status = StatusError
 		j.Error = err.Error()
 		m.saveHistoryLocked()
 		m.mu.Unlock()
+		m.saveSettings()
 		return JobView{}, err
 	}
 	v := j.viewLocked()
 	m.saveHistoryLocked()
 	m.mu.Unlock()
+	m.saveSettings()
 	return v, nil
 }
 
