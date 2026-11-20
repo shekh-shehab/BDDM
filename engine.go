@@ -469,8 +469,9 @@ type Manager struct {
 	groups       []*Group                // folder downloads (groups.go)
 	ann          announcer               // toasts / notifications (groups.go)
 
-	tClient   torrentClient // shared BitTorrent client (torrent.go)
-	tLoopback bool          // tests: listen on 127.0.0.1 only, no DHT
+	tClient    torrentClient                // shared BitTorrent client (torrent.go)
+	tLoopback  bool                         // tests: listen on 127.0.0.1 only, no DHT
+	tPieceComp map[string]torrentPieceStore // open piece-completion stores, keyed by info hash
 
 	// Speed limits (speedlimit.go).
 	httpLim      *tokenBucket
@@ -920,9 +921,15 @@ func (m *Manager) Delete(id string, deleteFile bool) error {
 	if j.Status == StatusDownloading || j.Status == StatusQueued || j.Status == StatusSeeding {
 		j.Status = StatusPaused
 	}
-	if deleteFile && j.Kind == kindTorrent {
-		m.removeTorrentFiles(j)
+	if j.Kind == kindTorrent {
+		// Always drop resume data kept in the BDDM folder. The user's
+		// downloaded files are only deleted when they asked to remove them.
 		m.removeTorrentMeta(j)
+		m.removeTorrentCompletion(j)
+		m.maybeRemoveOldCompletionInDirLocked(j.Dir)
+		if deleteFile {
+			m.removeTorrentFiles(j)
+		}
 	} else if deleteFile && j.Kind == "video" {
 		removeVideoFiles(j)
 	} else if deleteFile && j.Name != "" {

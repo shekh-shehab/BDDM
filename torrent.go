@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	g "github.com/anacrolix/generics"
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/storage"
@@ -33,6 +34,7 @@ const (
 // Aliases so engine.go can hold these handles without importing the library.
 type torrentHandle = *torrent.Torrent
 type torrentClient = *torrent.Client
+type torrentPieceStore = storage.PieceCompletion
 
 // testTorrentLoopback is set while `go test` runs so tests never open DHT,
 // UPnP or a public listen address.
@@ -127,13 +129,200 @@ func parseMagnet(raw string) (parsedMagnet, error) {
 
 func (m *Manager) torrentsDir() string { return filepath.Join(m.configDir, "torrents") }
 
-// torrentFileStorage writes torrent data under dir. Part files and in-memory
-// piece completion are used so several torrents can share the same folder
-// without locking a piece-completion database.
-func torrentFileStorage(dir string) storage.ClientImpl {
+// torrentPieceDBName is the file name anacrolix gives a bolt piece-completion store.
+const torrentPieceDBName = ".torrent.bolt.db"
+
+func safeInfoHash(hash string) string {
+	hash = strings.ToLower(strings.TrimSpace(hash))
+	if len(hash) < 8 || len(hash) > 64 {
+		return ""
+	}
+	for _, r := range hash {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+			return ""
+		}
+	}
+	return hash
+}
+
+func (m *Manager) pieceCompletionDir(hash string) string {
+	hash = safeInfoHash(hash)
+	if hash == "" {
+		return ""
+	}
+	return filepath.Join(m.torrentsDir(), hash)
+}
+
+func copyFileIfMissing(src, dst string) error {
+	if fileExists(dst) {
+		return nil
+	}
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+		return err
+	}
+	return writeFileSync(dst, data)
+}
+
+// migrateOldPieceCompletionLocked copies an old leftover .torrent.bolt.db from
+// the user's download folder into the BDDM data folder, then removes the leftover
+// once every known torrent in that folder has a copy.
+func (m *Manager) migrateOldPieceCompletionLocked(downloadDir, hash string) {
+	downloadDir = strings.TrimSpace(downloadDir)
+	if downloadDir == "" {
+		return
+	}
+	src := filepath.Join(downloadDir, torrentPieceDBName)
+	if !fileExists(src) {
+		return
+	}
+	hashes := map[string]bool{}
+	if h := safeInfoHash(hash); h != "" {
+		hashes[h] = true
+	}
+	wantDir := filepath.Clean(downloadDir)
+	for _, j := range m.jobs {
+		if j == nil || j.Kind != kindTorrent || j.Removed || j.Torrent == nil {
+			continue
+		}
+		if j.Dir != "" && filepath.Clean(j.Dir) == wantDir {
+			if h := safeInfoHash(j.Torrent.InfoHash); h != "" {
+				hashes[h] = true
+			}
+		}
+	}
+	if len(hashes) == 0 {
+		return
+	}
+	ok := true
+	for h := range hashes {
+		dest := filepath.Join(m.pieceCompletionDir(h), torrentPieceDBName)
+		if err := copyFileIfMissing(src, dest); err != nil {
+			log.Printf("could not copy torrent resume data out of %s: %v", downloadDir, err)
+			ok = false
+		}
+	}
+	if !ok {
+		return
+	}
+	for h := range hashes {
+		if !fileExists(filepath.Join(m.pieceCompletionDir(h), torrentPieceDBName)) {
+			return
+		}
+	}
+	if err := os.Remove(src); err != nil && !os.IsNotExist(err) {
+		log.Printf("could not remove leftover %s: %v", src, err)
+	}
+}
+
+// pieceCompletionRef is a view of a store the Manager owns. Close is a no-op so
+// a storage client can be dropped without closing the shared bolt database.
+type pieceCompletionRef struct {
+	storage.PieceCompletion
+}
+
+func (pieceCompletionRef) Close() error { return nil }
+
+func (p pieceCompletionRef) Persistent() bool {
+	if c, ok := p.PieceCompletion.(storage.PieceCompletionPersistenter); ok {
+		return c.Persistent()
+	}
+	return true
+}
+
+func (p pieceCompletionRef) Checkpoint(keys []metainfo.PieceKey) error {
+	if c, ok := p.PieceCompletion.(storage.PieceCompletionCheckpointer); ok {
+		return c.Checkpoint(keys)
+	}
+	return nil
+}
+
+func (p pieceCompletionRef) SetBatch(changes []storage.PieceCompletionChange) error {
+	if c, ok := p.PieceCompletion.(storage.PieceCompletionBatchSetter); ok {
+		return c.SetBatch(changes)
+	}
+	for _, ch := range changes {
+		if err := p.PieceCompletion.Set(ch.Key, g.Some(ch.Complete)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// pieceCompletionLocked opens (or reuses) the bolt store for one torrent under
+// the BDDM data folder. m.mu must be held.
+func (m *Manager) pieceCompletionLocked(hash string) (storage.PieceCompletion, error) {
+	hash = safeInfoHash(hash)
+	if hash == "" {
+		return storage.NewMapPieceCompletion(), nil
+	}
+	if m.tPieceComp != nil {
+		if pc, ok := m.tPieceComp[hash]; ok && pc != nil {
+			return pieceCompletionRef{pc}, nil
+		}
+	}
+	dir := m.pieceCompletionDir(hash)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return nil, err
+	}
+	pc, err := storage.NewBoltPieceCompletion(dir)
+	if err != nil {
+		return nil, fmt.Errorf("could not open torrent resume data: %w", err)
+	}
+	if m.tPieceComp == nil {
+		m.tPieceComp = map[string]torrentPieceStore{}
+	}
+	m.tPieceComp[hash] = pc
+	return pieceCompletionRef{pc}, nil
+}
+
+func (m *Manager) closePieceCompletionLocked(hash string) {
+	hash = safeInfoHash(hash)
+	if hash == "" || m.tPieceComp == nil {
+		return
+	}
+	if pc, ok := m.tPieceComp[hash]; ok {
+		_ = pc.Close()
+		delete(m.tPieceComp, hash)
+	}
+}
+
+func (m *Manager) closeAllPieceCompletionsLocked() {
+	for h, pc := range m.tPieceComp {
+		if pc != nil {
+			_ = pc.Close()
+		}
+		delete(m.tPieceComp, h)
+	}
+}
+
+// torrentFileStorage writes torrent data under dir and keeps piece-completion
+// under the BDDM data folder, so several torrents can share one download folder
+// without locking a database there, and so .torrent.bolt.db is not created in
+// the user's folder.
+func (m *Manager) torrentFileStorage(dir, hash string) (storage.ClientImpl, error) {
+	m.migrateOldPieceCompletionLocked(dir, hash)
+	pc, err := m.pieceCompletionLocked(hash)
+	if err != nil {
+		return nil, err
+	}
 	return storage.NewFileOpts(storage.NewFileClientOpts{
-		ClientBaseDir: dir,
-		Logger:        slog.New(slog.DiscardHandler),
+		ClientBaseDir:   dir,
+		PieceCompletion: pc,
+		Logger:          slog.New(slog.DiscardHandler),
+	}), nil
+}
+
+// torrentScratchStorage is used only while looking up magnet metadata. Nothing
+// is written to the user's download folder.
+func torrentScratchStorage(dir string) storage.ClientImpl {
+	return storage.NewFileOpts(storage.NewFileClientOpts{
+		ClientBaseDir:   dir,
+		PieceCompletion: storage.NewMapPieceCompletion(),
+		Logger:          slog.New(slog.DiscardHandler),
 	})
 }
 
@@ -209,6 +398,9 @@ func (m *Manager) newTorrentConfig() *torrent.ClientConfig {
 	cfg.Slogger = slog.New(slog.DiscardHandler)
 	cfg.DataDir = filepath.Join(m.configDir, "torrent-work")
 	_ = os.MkdirAll(cfg.DataDir, 0755)
+	// Do not use storage.NewFile (it would put .torrent.bolt.db in torrent-work).
+	// Each started torrent sets its own storage; this is only a fallback.
+	cfg.DefaultStorage = torrentScratchStorage(cfg.DataDir)
 	cfg.ListenPort = torrentListenPort
 	if p := m.readTorrentPort(); p != 0 {
 		cfg.ListenPort = p
@@ -259,11 +451,11 @@ func (m *Manager) ensureClientLocked() error {
 }
 
 func (m *Manager) closeTorrentClientLocked() {
-	if m.tClient == nil {
-		return
+	if m.tClient != nil {
+		_ = m.tClient.Close()
+		m.tClient = nil
 	}
-	_ = m.tClient.Close()
-	m.tClient = nil
+	m.closeAllPieceCompletionsLocked()
 }
 
 func applyTorrentMeta(j *Job, info *metainfo.Info, settings Settings) {
@@ -440,7 +632,7 @@ func (m *Manager) resolveMagnet(id, uri string) {
 		m.mu.Unlock()
 		return
 	}
-	spec.Storage = torrentFileStorage(filepath.Join(m.configDir, "torrent-work"))
+	spec.Storage = torrentScratchStorage(filepath.Join(m.configDir, "torrent-work"))
 	t, _, err := cl.AddTorrentSpec(spec)
 	if err != nil {
 		m.mu.Lock()
@@ -534,6 +726,8 @@ func (m *Manager) CancelTorrent(id string) error {
 		j.th.Drop()
 		j.th = nil
 	}
+	m.removeTorrentMeta(j)
+	m.removeTorrentCompletion(j)
 	// Remove from the list entirely (it was never confirmed).
 	out := m.jobs[:0]
 	for _, x := range m.jobs {
@@ -646,7 +840,15 @@ func (m *Manager) startTorrentLocked(j *Job) error {
 	if err := os.MkdirAll(j.Dir, 0755); err != nil {
 		return fmt.Errorf("cannot use this folder: %w", err)
 	}
-	spec.Storage = torrentFileStorage(j.Dir)
+	hash := ""
+	if j.Torrent != nil {
+		hash = j.Torrent.InfoHash
+	}
+	store, err := m.torrentFileStorage(j.Dir, hash)
+	if err != nil {
+		return err
+	}
+	spec.Storage = store
 	t, _, err := m.tClient.AddTorrentSpec(spec)
 	if err != nil {
 		return err
@@ -668,7 +870,7 @@ func (m *Manager) startTorrentLocked(j *Job) error {
 		}
 	}
 	info := t.Info()
-	hash := strings.ToLower(t.InfoHash().HexString())
+	hash = strings.ToLower(t.InfoHash().HexString())
 	if j.Torrent == nil {
 		j.Torrent = &TorrentInfo{}
 	}
@@ -838,12 +1040,45 @@ func (m *Manager) removeTorrentFiles(j *Job) {
 }
 
 func (m *Manager) removeTorrentMeta(j *Job) {
-	if j.Torrent == nil || j.Torrent.MetaFile == "" {
+	if j == nil || j.Torrent == nil || j.Torrent.MetaFile == "" {
 		return
 	}
 	if p := m.metaPath(j.Torrent.MetaFile); p != "" {
 		_ = os.Remove(p)
 	}
+}
+
+func (m *Manager) removeTorrentCompletion(j *Job) {
+	if j == nil || j.Torrent == nil {
+		return
+	}
+	hash := safeInfoHash(j.Torrent.InfoHash)
+	if hash == "" {
+		return
+	}
+	m.closePieceCompletionLocked(hash)
+	if dir := m.pieceCompletionDir(hash); dir != "" {
+		_ = os.RemoveAll(dir)
+	}
+}
+
+// maybeRemoveOldCompletionInDirLocked deletes a leftover .torrent.bolt.db from
+// the user's folder when no remaining torrent still uses that folder.
+func (m *Manager) maybeRemoveOldCompletionInDirLocked(dir string) {
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
+		return
+	}
+	want := filepath.Clean(dir)
+	for _, j := range m.jobs {
+		if j == nil || j.Kind != kindTorrent || j.Removed {
+			continue
+		}
+		if j.Dir != "" && filepath.Clean(j.Dir) == want {
+			return
+		}
+	}
+	_ = os.Remove(filepath.Join(dir, torrentPieceDBName))
 }
 
 // addTorrentClientPeer is used by tests to introduce a local seeder.
