@@ -4,7 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>BDDM - Download Manager</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%233b82f6'/%3E%3Cpath d='M32 14v26m-11-11 11 11 11-11M18 48h28' stroke='white' stroke-width='6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="icon" type="image/png" sizes="32x32" href="icon-32.png">
+<link rel="icon" type="image/png" sizes="128x128" href="icon.png">
 <style>
   :root {
     color-scheme: light;
@@ -94,7 +95,9 @@
 
   header { display: flex; align-items: center; gap: 18px; padding: 12px 20px; background: var(--panel); border-bottom: 1px solid var(--line); }
   .logo { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 17px; letter-spacing: .5px; }
-  .logo svg { width: 26px; height: 26px; }
+  .logo img { width: 26px; height: 26px; border-radius: 6px; display: block; }
+  .about-logo { display: flex; flex-direction: column; align-items: center; margin-top: 20px; }
+  .about-logo img { width: 64px; height: 64px; border-radius: 14px; }
   nav { display: flex; gap: 4px; }
   nav button { background: transparent; border-color: transparent; color: var(--muted); }
   nav button.active { background: var(--panel2); border-color: var(--line); color: var(--text); }
@@ -210,7 +213,7 @@
 <body>
 <header>
   <div class="logo">
-    <svg viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#3b82f6"/><path d="M32 14v26m-11-11 11 11 11-11M18 48h28" stroke="white" stroke-width="6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <img src="icon-32.png" alt="">
     BDDM
   </div>
   <nav>
@@ -314,7 +317,10 @@
       <div id="cats"></div>
       <button id="saveCats" class="primary" style="margin-top:8px">Save folders</button>
     </div>
-    <div class="hint" id="appVersion" style="margin-top:12px;text-align:center"></div>
+    <div class="about-logo">
+      <img src="icon.png" alt="BDDM">
+      <div class="hint" id="appVersion" style="margin-top:10px;text-align:center"></div>
+    </div>
     <div style="text-align:center;margin-top:8px">
       <button id="checkUpdatesBtn" class="small">Check for updates</button>
       <button id="settingsInstallBtn" class="small primary" hidden>Install</button>

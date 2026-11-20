@@ -1,5 +1,7 @@
 # BDDM
 
+<img src="assets/icon.png" alt="BDDM" width="128" height="128">
+
 BDDM is a Windows download manager written in Go. A browser extension for Firefox and Chromium-based browsers (Chrome, Edge, Brave, and others) can send downloads and videos to it.
 
 ## Install

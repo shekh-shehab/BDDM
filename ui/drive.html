@@ -4,7 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Download Google Drive folder</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%233b82f6'/%3E%3Cpath d='M32 14v26m-11-11 11 11 11-11M18 48h28' stroke='white' stroke-width='6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="icon" type="image/png" sizes="32x32" href="icon-32.png">
+<link rel="icon" type="image/png" sizes="128x128" href="icon.png">
 <style>
   :root {
     --bg: #14161b; --panel: #1c1f26; --panel2: #232733; --line: #2e3340;
@@ -15,7 +16,7 @@
   html, body { margin: 0; height: 100%; }
   body { background: var(--bg); color: var(--text); font: 14px/1.4 "Segoe UI", system-ui, -apple-system, sans-serif; display: flex; flex-direction: column; }
   header { display: flex; align-items: center; gap: 10px; padding: 12px 18px; background: var(--panel); border-bottom: 1px solid var(--line); font-weight: 700; font-size: 16px; }
-  header svg { width: 24px; height: 24px; flex: none; }
+  header img { width: 24px; height: 24px; flex: none; border-radius: 6px; display: block; }
   main { flex: 1; padding: 16px 18px 8px; overflow: auto; }
   .field { margin-bottom: 13px; }
   .field label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; margin-bottom: 5px; }
@@ -59,7 +60,7 @@
 </head>
 <body>
 <header>
-  <svg viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#3b82f6"/><path d="M32 14v26m-11-11 11 11 11-11M18 48h28" stroke="white" stroke-width="6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  <img src="icon-32.png" alt="" width="24" height="24">
   <span id="title">Google Drive folder</span>
 </header>
 <main>
