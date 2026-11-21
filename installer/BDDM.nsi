@@ -15,10 +15,11 @@ Target amd64-unicode
 !insertmacro GetOptions
 
 !ifndef VERSION
-  !define VERSION "1.4.11"
+  !define VERSION "1.4.12"
 !endif
 !define APP "BDDM"
 !define APPNAME "BDDM Download Manager"
+!define APP_USER_MODEL_ID "BDDM.DownloadManager"
 !define UNKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\BDDM"
 !define RUNKEY "Software\Microsoft\Windows\CurrentVersion\Run"
 
@@ -79,6 +80,7 @@ Section "BDDM (required)" SecMain
   File "..\build\BDDM.exe"
   File "..\INSTALL.txt"
   File "BDDM.ico"
+  File "/oname=BDDM.png" "..\ui\icon.png"
 
   ; The browser extension: a folder for "Load unpacked" (Chrome, Edge,
   ; Brave, Opera, Vivaldi) and the Firefox package.
@@ -139,6 +141,10 @@ Function .onInit
 FunctionEnd
 
 Function .onInstSuccess
+  ; Stamp Start menu / desktop shortcuts with BDDM's AppUserModelID so
+  ; notifications and the taskbar show BDDM, not Windows PowerShell.
+  ; Shortcuts were just (re)created, including on an update of an older install.
+  nsExec::ExecToLog '"$INSTDIR\BDDM.exe" -register'
   ${If} $StartAfter == "1"
     Exec '"$INSTDIR\BDDM.exe"'
   ${EndIf}
@@ -154,6 +160,7 @@ Section "Uninstall"
   Delete "$INSTDIR\BDDM.exe"
   Delete "$INSTDIR\INSTALL.txt"
   Delete "$INSTDIR\BDDM.ico"
+  Delete "$INSTDIR\BDDM.png"
   RMDir /r "$INSTDIR\extension"
   Delete "$INSTDIR\Uninstall.exe"
   RMDir "$INSTDIR"
@@ -162,6 +169,8 @@ Section "Uninstall"
   DeleteRegValue HKCU "${RUNKEY}" "BDDM"
   DeleteRegKey HKCU "${UNKEY}"
   DeleteRegKey HKCU "Software\BDDM"
+  DeleteRegKey HKCU "Software\Classes\AppUserModelId\${APP_USER_MODEL_ID}"
+  DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Notifications\Settings\${APP_USER_MODEL_ID}"
   ; Settings, history and the video tools are in %APPDATA%\BDDM.
   ; Downloaded files are never touched.
   IfSilent done

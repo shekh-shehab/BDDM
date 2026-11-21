@@ -80,43 +80,11 @@ func runPowerShellStart(script string, timeout time.Duration, foreground bool, w
 	}
 }
 
-func psQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
-
-func xmlEscape(s string) string {
-	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;", "'", "&apos;")
-	return r.Replace(s)
-}
-
-// notify shows a Windows toast. If toasts are not available it falls back to
-// a tray balloon. Errors are only logged.
+// notify shows a Windows toast under BDDM's own name and icon. If toasts
+// are not available it falls back to a tray balloon. Errors are only logged.
 func notify(title, body string) {
-	xml := `<toast><visual><binding template="ToastGeneric"><text>` + xmlEscape(title) +
-		`</text><text>` + xmlEscape(body) + `</text></binding></visual></toast>`
-	script := `
-$ErrorActionPreference = 'Stop'
-$title = ` + psQuote(title) + `
-$body = ` + psQuote(body) + `
-try {
-  [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
-  [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null
-  $xml = New-Object Windows.Data.Xml.Dom.XmlDocument
-  $xml.LoadXml(` + psQuote(xml) + `)
-  $toast = New-Object Windows.UI.Notifications.ToastNotification $xml
-  $appId = '{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe'
-  [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($appId).Show($toast)
-} catch {
-  Add-Type -AssemblyName System.Windows.Forms
-  Add-Type -AssemblyName System.Drawing
-  $n = New-Object System.Windows.Forms.NotifyIcon
-  $n.Icon = [System.Drawing.SystemIcons]::Information
-  $n.BalloonTipTitle = $title
-  $n.BalloonTipText = $body
-  $n.Visible = $true
-  $n.ShowBalloonTip(5000)
-  Start-Sleep -Seconds 6
-  $n.Dispose()
-}
-`
+	logo, ico := toastIconPaths()
+	script := windowsNotifyScript(title, body, logo, ico)
 	if _, err := runPowerShell(script, 20*time.Second); err != nil {
 		log.Printf("notification failed: %v", err)
 	}

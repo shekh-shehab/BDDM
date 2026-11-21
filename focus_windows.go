@@ -423,6 +423,7 @@ func focusExistingMainWindow() bool {
 // the main window is already open we bring that to the front; otherwise we
 // wait for the new window and activate it.
 func focusOpenedWindow(u string, before map[uintptr]bool, startedPID int) {
+	defer scheduleTagBDDMAppWindows()
 	if startedPID > 0 {
 		allowSetForegroundWindow(uint32(startedPID))
 	}

@@ -28,13 +28,20 @@ import (
 const port = "9614"
 
 // appVersion is the BDDM version shown in Settings and on the update notice.
-const appVersion = "1.4.11"
+const appVersion = "1.4.12"
 
 func main() {
 	noWindow := flag.Bool("nowindow", false, "do not open the window (run in the background)")
 	quitRunning := flag.Bool("quit", false, "stop a running BDDM (downloads are paused and saved) and exit")
+	registerOnly := flag.Bool("register", false, "update this install's Windows shortcuts and notifications, then exit")
 	flag.Parse()
 	appURL := "http://127.0.0.1:" + port
+	if *registerOnly { // used by the installer after it creates shortcuts
+		if err := registerAppIdentity(); err != nil {
+			os.Exit(1)
+		}
+		return
+	}
 	if *quitRunning { // used by the installer before it replaces BDDM.exe
 		stopRunning(appURL)
 		return
@@ -46,6 +53,10 @@ func main() {
 	}
 	_ = os.MkdirAll(configDir, 0755)
 	setupLog(configDir)
+	setCurrentProcessAppUserModelID()
+	if err := registerAppIdentity(); err != nil {
+		log.Printf("Windows app identity: %v", err)
+	}
 
 	ln, err := net.Listen("tcp", "127.0.0.1:"+port)
 	if err != nil {
