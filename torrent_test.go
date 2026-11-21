@@ -511,3 +511,148 @@ func mustSize(p string) int64 {
 	}
 	return fi.Size()
 }
+
+func torrentJob(m *Manager, id string) *Job {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.findLocked(id)
+}
+
+func reopenTorrentManager(t *testing.T, cfg, dl string, resumeOnStart bool) *Manager {
+	t.Helper()
+	m, err := NewManager(cfg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { m.Shutdown() })
+	m.tLoopback = true
+	s := m.Settings()
+	s.DownloadDir = dl
+	s.ResumeOnStart = resumeOnStart
+	if _, err := m.SetSettings(s); err != nil {
+		t.Fatal(err)
+	}
+	m.mu.Lock()
+	m.restoreTorrentsLocked()
+	m.mu.Unlock()
+	return m
+}
+
+func TestTorrentActiveResumesAfterRestart(t *testing.T) {
+	m, dl := torrentTestManager(t)
+	s := m.Settings()
+	s.ResumeOnStart = false // torrents should still come back
+	if _, err := m.SetSettings(s); err != nil {
+		t.Fatal(err)
+	}
+
+	base := t.TempDir()
+	metaActive, _, _ := writeTestTorrent(t, filepath.Join(base, "a"), "active.bin", bytes.Repeat([]byte("bddm-active-"), 2000))
+	metaPaused, _, _ := writeTestTorrent(t, filepath.Join(base, "p"), "paused.bin", bytes.Repeat([]byte("bddm-paused-"), 2000))
+
+	active, err := m.AddTorrentFile(metaActive, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.StartTorrent(active.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	paused, err := m.AddTorrentFile(metaPaused, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.StartTorrent(paused.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	waitTorrentStatus(t, m, active.ID, StatusDownloading, 5*time.Second)
+	if err := m.Pause(paused.ID); err != nil {
+		t.Fatal(err)
+	}
+	waitTorrentStatus(t, m, paused.ID, StatusPaused, 5*time.Second)
+	if j := torrentJob(m, paused.ID); j == nil || j.Interrupted {
+		t.Fatal("a user-paused torrent must not be marked to auto-resume")
+	}
+
+	cfg := m.configDir
+	m.Shutdown()
+
+	if j := torrentJob(m, active.ID); j == nil || !j.Interrupted {
+		t.Fatal("a downloading torrent must be marked to resume after shutdown")
+	}
+	if j := torrentJob(m, paused.ID); j == nil || j.Interrupted || j.Status != StatusPaused {
+		t.Fatalf("user-paused torrent should stay paused, not auto-resume: %+v", j)
+	}
+
+	m2 := reopenTorrentManager(t, cfg, dl, false)
+	waitTorrentStatus(t, m2, active.ID, StatusDownloading, 10*time.Second)
+	if got := waitTorrentStatus(t, m2, paused.ID, StatusPaused, 5*time.Second); got.Status != StatusPaused {
+		t.Fatalf("user-paused torrent resumed unexpectedly: %s", got.Status)
+	}
+}
+
+func TestTorrentResumesAfterUpdateStylePause(t *testing.T) {
+	// An in-app update used to pause every running torrent (without
+	// remembering that this was not a user pause). After that kind of
+	// save, the torrent must still start again.
+	m, dl := torrentTestManager(t)
+	s := m.Settings()
+	s.ResumeOnStart = false
+	if _, err := m.SetSettings(s); err != nil {
+		t.Fatal(err)
+	}
+	meta, _, _ := writeTestTorrent(t, t.TempDir(), "update.bin", bytes.Repeat([]byte("bddm-update-"), 2000))
+	job, err := m.AddTorrentFile(meta, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.StartTorrent(job.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	waitTorrentStatus(t, m, job.ID, StatusDownloading, 5*time.Second)
+
+	m.PauseAllRunning()
+	waitTorrentStatus(t, m, job.ID, StatusPaused, 5*time.Second)
+	if j := torrentJob(m, job.ID); j == nil || !j.Interrupted {
+		t.Fatal("update-style pause should still mark the torrent to resume")
+	}
+
+	cfg := m.configDir
+	m.Shutdown()
+	m2 := reopenTorrentManager(t, cfg, dl, false)
+	waitTorrentStatus(t, m2, job.ID, StatusDownloading, 10*time.Second)
+}
+
+func TestTorrentSeedingResumesAfterShutdown(t *testing.T) {
+	data := bytes.Repeat([]byte("BDDM-SEED-RESUME-"), 4096)
+	tmp := t.TempDir()
+	meta, mi, srcDir := writeTestTorrent(t, tmp, "seed.bin", data)
+	seeder := startTestSeeder(t, mi, srcDir)
+
+	m, dl := torrentTestManager(t)
+	s := m.Settings()
+	s.ResumeOnStart = false
+	if _, err := m.SetSettings(s); err != nil {
+		t.Fatal(err)
+	}
+	job, err := m.AddTorrentFile(meta, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.StartTorrent(job.ID, dl); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if err := m.addTorrentClientPeer(job.ID, seeder); err != nil {
+		t.Fatal(err)
+	}
+	waitTorrentStatus(t, m, job.ID, StatusSeeding, 20*time.Second)
+
+	cfg := m.configDir
+	m.Shutdown()
+	if j := torrentJob(m, job.ID); j == nil || !j.Interrupted {
+		t.Fatal("a seeding torrent must be marked to resume after shutdown")
+	}
+
+	m2 := reopenTorrentManager(t, cfg, dl, false)
+	waitTorrentStatus(t, m2, job.ID, StatusSeeding, 15*time.Second)
+}

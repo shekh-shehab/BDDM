@@ -805,8 +805,10 @@ func (m *Manager) Pause(id string) error {
 			j.cancel()
 		}
 		j.Status = StatusPaused
+		j.Interrupted = false // the user asked to pause; do not auto-resume
 	case StatusQueued:
 		j.Status = StatusPaused
+		j.Interrupted = false
 	default:
 		return nil
 	}
@@ -841,6 +843,7 @@ func (m *Manager) PauseAllRunning() {
 		if j.cancel != nil {
 			j.cancel()
 		}
+		j.Interrupted = true // not a user pause: resume after an update or restart
 		j.Status = StatusPaused
 		running = append(running, j)
 	}

@@ -581,3 +581,61 @@ func TestInstallCancel(t *testing.T) {
 		}
 	}
 }
+
+func TestInstallShutsDownBeforeSetup(t *testing.T) {
+	payload := []byte("setup-after-shutdown")
+	mux := http.NewServeMux()
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	mux.HandleFunc("/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+		w.Write(releaseJSON(t, srv.URL, srv.URL+"/files/BDDM-Setup.exe", "", len(payload)))
+	})
+	mux.HandleFunc("/files/BDDM-Setup.exe", func(w http.ResponseWriter, r *http.Request) {
+		w.Write(payload)
+	})
+
+	var mu sync.Mutex
+	var order []string
+	step := func(name string) {
+		mu.Lock()
+		order = append(order, name)
+		mu.Unlock()
+	}
+
+	u := newUpdater("1.4.12", nil, nil, nil)
+	u.client, u.dlClient, u.apiURL, u.dir = srv.Client(), srv.Client(), srv.URL+"/releases/latest", t.TempDir()
+	u.prepare = func() { step("prepare") }
+	u.runSetup = func(path string) error {
+		mu.Lock()
+		n := len(order)
+		mu.Unlock()
+		if n == 0 || order[n-1] != "prepare" {
+			t.Errorf("installer started before shutdown/prepare; order=%v", append([]string(nil), order...))
+		}
+		step("setup")
+		return nil
+	}
+	u.quitFn = func() { step("quit") }
+	u.Check(false)
+	u.Install()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		n := len(order)
+		mu.Unlock()
+		if n >= 3 {
+			break
+		}
+		if u.Status().State == "error" {
+			t.Fatalf("install error: %s", u.Status().Error)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	mu.Lock()
+	got := append([]string(nil), order...)
+	mu.Unlock()
+	if strings.Join(got, ",") != "prepare,setup,quit" {
+		t.Fatalf("update steps: got %v, want prepare then setup then quit", got)
+	}
+}

@@ -794,7 +794,12 @@ func (m *Manager) StartTorrent(id, dir string) (JobView, error) {
 // or seeding. User-paused torrents stay paused. m.mu must be held.
 func (m *Manager) restoreTorrentsLocked() {
 	for _, j := range m.jobs {
-		if j.Kind != kindTorrent || j.Removed || j.Status == StatusPending || j.Status == StatusPaused || j.Status == StatusError {
+		if j.Kind != kindTorrent || j.Removed || j.Status == StatusPending || j.Status == StatusError {
+			continue
+		}
+		// User-paused torrents stay paused. Interrupted means BDDM was
+		// closed or updated while this torrent was still running.
+		if j.Status == StatusPaused && !j.Interrupted {
 			continue
 		}
 		if j.Status == StatusDownloading || j.Status == StatusQueued || j.Status == StatusSeeding || j.Interrupted {

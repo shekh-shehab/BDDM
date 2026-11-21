@@ -157,7 +157,7 @@ func TestInstallerSetsAUMIDAndRegister(t *testing.T) {
 		`File "/oname=BDDM.png"`,
 		`Delete "$INSTDIR\BDDM.png"`,
 		`Software\Classes\AppUserModelId\${APP_USER_MODEL_ID}`,
-		`!define VERSION "1.4.12"`,
+		`!define VERSION "1.4.13"`,
 	} {
 		if !strings.Contains(nsi, want) {
 			t.Errorf("BDDM.nsi missing %q", want)
@@ -171,8 +171,28 @@ func TestInstallerSetsAUMIDAndRegister(t *testing.T) {
 	}
 }
 
-func TestAppVersionIs1412(t *testing.T) {
-	if appVersion != "1.4.12" {
-		t.Fatalf("appVersion = %q, want 1.4.12", appVersion)
+func TestAppVersionIs1413(t *testing.T) {
+	if appVersion != "1.4.13" {
+		t.Fatalf("appVersion = %q, want 1.4.13", appVersion)
+	}
+}
+
+func TestInstallerWaitsForGracefulQuit(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("installer", "BDDM.nsi"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	nsi := string(data)
+	if !strings.Contains(nsi, `-quit`) {
+		t.Fatal("installer should ask a running BDDM to quit")
+	}
+	if !strings.Contains(nsi, "tasklist") || !strings.Contains(nsi, "loop_wait_") {
+		t.Fatal("installer should wait for BDDM.exe to exit before force-killing it")
+	}
+	quit := strings.Index(nsi, `-quit`)
+	wait := strings.Index(nsi, "tasklist")
+	kill := strings.LastIndex(nsi, `taskkill /IM BDDM.exe /F`)
+	if quit < 0 || wait < 0 || kill < 0 || !(quit < wait && wait < kill) {
+		t.Fatal("force-kill must come after asking BDDM to quit and waiting for it")
 	}
 }

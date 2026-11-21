@@ -15,7 +15,7 @@ Target amd64-unicode
 !insertmacro GetOptions
 
 !ifndef VERSION
-  !define VERSION "1.4.12"
+  !define VERSION "1.4.13"
 !endif
 !define APP "BDDM"
 !define APPNAME "BDDM Download Manager"
@@ -61,12 +61,31 @@ VIAddVersionKey "LegalCopyright" "BDDM"
 
 !insertmacro MUI_LANGUAGE "English"
 
-; Asks a running BDDM to save and quit, then makes sure it is gone.
+; Asks a running BDDM to save and quit, then waits for it to exit.
+; Force-kill only if it is still running after that wait, so an in-app
+; update is not reported as "BDDM stopped working".
 !macro StopBDDM EXE
-  IfFileExists "${EXE}" 0 +2
+  !define StopBDDM_ID ${__LINE__}
+  IfFileExists "${EXE}" 0 skip_quit_${StopBDDM_ID}
     nsExec::Exec '"${EXE}" -quit'
-  nsExec::Exec 'taskkill /IM BDDM.exe /F'
-  Sleep 500
+  skip_quit_${StopBDDM_ID}:
+  StrCpy $R9 0
+  loop_wait_${StopBDDM_ID}:
+    nsExec::ExecToStack 'cmd /c tasklist /FI "IMAGENAME eq BDDM.exe" /NH | find /I "BDDM.exe"'
+    Pop $R8
+    Pop $R7
+    IntCmp $R8 0 still_${StopBDDM_ID} done_${StopBDDM_ID} still_${StopBDDM_ID}
+  still_${StopBDDM_ID}:
+    IntCmp $R9 40 force_${StopBDDM_ID} wait_${StopBDDM_ID} force_${StopBDDM_ID}
+  wait_${StopBDDM_ID}:
+    Sleep 500
+    IntOp $R9 $R9 + 1
+    Goto loop_wait_${StopBDDM_ID}
+  force_${StopBDDM_ID}:
+    nsExec::Exec 'taskkill /IM BDDM.exe /F'
+    Sleep 500
+  done_${StopBDDM_ID}:
+  !undef StopBDDM_ID
 !macroend
 
 Section "BDDM (required)" SecMain

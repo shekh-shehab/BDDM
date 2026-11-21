@@ -419,6 +419,11 @@ func (u *Updater) doInstall(ctx context.Context, client *http.Client, dir, curre
 	prepare, runSetup, quitFn := u.prepare, u.runSetup, u.quitFn
 	u.mu.Unlock()
 
+	// prepare (Manager.Shutdown) stops the server-side work and saves
+	// state, including which torrents should start again. The installer
+	// is started only after that, then this process exits. The installer
+	// waits for this process to leave on its own and only force-kills it
+	// as a last resort.
 	if prepare != nil {
 		prepare()
 	}

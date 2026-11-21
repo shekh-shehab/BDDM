@@ -28,7 +28,7 @@ import (
 const port = "9614"
 
 // appVersion is the BDDM version shown in Settings and on the update notice.
-const appVersion = "1.4.12"
+const appVersion = "1.4.13"
 
 func main() {
 	noWindow := flag.Bool("nowindow", false, "do not open the window (run in the background)")
@@ -90,7 +90,9 @@ func main() {
 		notify)
 	upd.dir = configDir
 	upd.running = m.RunningCount
-	upd.prepare = m.PauseAllRunning
+	// Stop transfers and save before the installer starts, so torrents
+	// that were running can resume and Windows does not have to force-kill BDDM.
+	upd.prepare = m.Shutdown
 	upd.runSetup = runSilentSetup
 	upd.Start()
 
@@ -179,23 +181,50 @@ func (consoleWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// stopRunning asks a running BDDM to quit and waits (up to 15 s) until it has
-// saved its downloads and closed.
+// stopRunning asks a running BDDM to quit and waits until it has saved its
+// downloads and closed. If BDDM is already shutting down (the HTTP API may
+// not answer), it still waits for the port to close so the installer does
+// not force-kill the process mid-save.
 func stopRunning(appURL string) {
-	if !isBDDMRunning(appURL) {
+	addr := "127.0.0.1:" + port
+	running := isBDDMRunning(appURL)
+	if !running && !tcpPortOpen(addr, 300*time.Millisecond) {
 		return
 	}
-	c := http.Client{Timeout: 3 * time.Second}
-	if resp, err := c.Post(appURL+"/api/quit", "application/json", nil); err == nil {
-		resp.Body.Close()
-	}
-	for i := 0; i < 60; i++ {
-		conn, err := net.DialTimeout("tcp", "127.0.0.1:"+port, 300*time.Millisecond)
-		if err != nil {
-			time.Sleep(500 * time.Millisecond) // the process exits right after closing the port
-			return
+	if running {
+		c := http.Client{Timeout: 3 * time.Second}
+		if resp, err := c.Post(appURL+"/api/quit", "application/json", nil); err == nil {
+			resp.Body.Close()
 		}
-		conn.Close()
+	}
+	_ = waitForClosedPort(addr, 20*time.Second, 500*time.Millisecond)
+}
+
+// tcpPortOpen is true when something is accepting connections on addr.
+func tcpPortOpen(addr string, timeout time.Duration) bool {
+	conn, err := net.DialTimeout("tcp", addr, timeout)
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
+}
+
+// waitForClosedPort waits until addr is no longer accepting connections.
+// linger is a short extra wait after it first looks closed, so a process
+// that has just shut its listener can finish exiting.
+func waitForClosedPort(addr string, timeout, linger time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for {
+		if !tcpPortOpen(addr, 300*time.Millisecond) {
+			if linger > 0 {
+				time.Sleep(linger)
+			}
+			return true
+		}
+		if time.Now().After(deadline) {
+			return !tcpPortOpen(addr, 300*time.Millisecond)
+		}
 		time.Sleep(250 * time.Millisecond)
 	}
 }
