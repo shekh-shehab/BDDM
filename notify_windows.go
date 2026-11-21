@@ -56,16 +56,21 @@ func runPowerShellStart(script string, timeout time.Duration, foreground bool, w
 	cmd.Stdout = &out
 	var err error
 	var before map[uintptr]bool
+	stopWatch := func() {}
 	if foreground {
+		if watchOwner != 0 {
+			clearTopmost(watchOwner)
+		}
 		before = snapshotPickerHWND()
 		withForeground(func() { err = cmd.Start() })
 		if cmd.Process != nil {
 			allowSetForegroundWindow(uint32(cmd.Process.Pid))
-			watchFileDialog(before, watchOwner, uint32(cmd.Process.Pid))
+			stopWatch = watchFileDialog(before, watchOwner, uint32(cmd.Process.Pid))
 		}
 	} else {
 		err = cmd.Start()
 	}
+	defer stopWatch()
 	if err != nil {
 		return "", err
 	}
@@ -211,23 +216,30 @@ public class WinFocus {
 function Raise-BddmDialog {
   foreach ($title in @('Choose the folder for downloads','Add torrent','Browse For Folder')) {
     $h = [WinFocus]::FindWindow('#32770', $title)
+    if ($h -eq [IntPtr]::Zero) { $h = [WinFocus]::FindWindow($null, $title) }
     if ($h -ne [IntPtr]::Zero) {
       [WinFocus]::AllowSetForegroundWindow(-1)
       [void][WinFocus]::SetWindowPos($h, [IntPtr](-1), 0,0,0,0, 0x0003)
-      [void][WinFocus]::SetWindowPos($h, [IntPtr](-2), 0,0,0,0, 0x0003)
       [void][WinFocus]::BringWindowToTop($h)
       [void][WinFocus]::SetForegroundWindow($h)
-      return
+      return $h
+    }
+  }
+  return [IntPtr]::Zero
+}
+function Clear-BddmDialogTopMost {
+  foreach ($title in @('Choose the folder for downloads','Add torrent','Browse For Folder')) {
+    $h = [WinFocus]::FindWindow('#32770', $title)
+    if ($h -eq [IntPtr]::Zero) { $h = [WinFocus]::FindWindow($null, $title) }
+    if ($h -ne [IntPtr]::Zero) {
+      [void][WinFocus]::SetWindowPos($h, [IntPtr](-2), 0,0,0,0, 0x0003)
     }
   }
 }
 $raiseTimer = New-Object System.Windows.Forms.Timer
 $raiseTimer.Interval = 50
-$script:raiseN = 0
 $raiseTimer.Add_Tick({
-  $script:raiseN++
   try { Raise-BddmDialog } catch {}
-  if ($script:raiseN -ge 30) { $raiseTimer.Stop() }
 })
 $raiseTimer.Start()
 `
@@ -243,7 +255,7 @@ try {
     [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
     Write-Output $d.SelectedPath
   }
-} finally { $raiseTimer.Stop(); $raiseTimer.Dispose() }
+} finally { $raiseTimer.Stop(); $raiseTimer.Dispose(); Clear-BddmDialogTopMost }
 `
 	out, err := runPowerShellDialog(script, 10*time.Minute, hwnd)
 	if err != nil {
@@ -263,7 +275,7 @@ try {
     [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
     Write-Output $d.FileName
   }
-} finally { $raiseTimer.Stop(); $raiseTimer.Dispose() }
+} finally { $raiseTimer.Stop(); $raiseTimer.Dispose(); Clear-BddmDialogTopMost }
 `
 	out, err := runPowerShellDialog(script, 10*time.Minute, hwnd)
 	if err != nil {

@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestIsBDDMUITitle(t *testing.T) {
 	yes := []string{
@@ -81,8 +84,13 @@ func TestIsChromeWidgetAndExplorerClass(t *testing.T) {
 }
 
 func TestIsDialogClass(t *testing.T) {
-	if !isDialogClass("#32770") || isDialogClass("Chrome_WidgetWin_1") || isDialogClass("") || isDialogClass("#32769") {
-		t.Fatal("dialog class")
+	for _, c := range []string{"#32770", "XamlExplorerHostIslandWindow", "WinUIDesktopWin32WindowClass", "Windows.UI.Core.CoreWindow"} {
+		if !isDialogClass(c) {
+			t.Errorf("expected %q to be a dialog class", c)
+		}
+	}
+	if isDialogClass("Chrome_WidgetWin_1") || isDialogClass("") || isDialogClass("#32769") || isDialogClass("CabinetWClass") {
+		t.Fatal("non-dialog classes")
 	}
 }
 
@@ -152,5 +160,46 @@ func TestIsCandidateFileDialog(t *testing.T) {
 	// Known title + class is enough when the pid could not be read.
 	if !isCandidateFileDialog("#32770", "Add torrent", dlg, 0, edge, 0, 0, before) {
 		t.Fatal("title and class with no pid")
+	}
+	// Windows 11 folder picker may be hosted by Explorer or a XAML island,
+	// often in another process, but it uses the title we set.
+	if !isCandidateFileDialog("CabinetWClass", "Choose the folder for downloads", dlg, 0, edge, 4, ourPID, before) {
+		t.Fatal("Explorer-hosted folder picker with our title")
+	}
+	if !isCandidateFileDialog("XamlExplorerHostIslandWindow", "Choose the folder for downloads", dlg, 0, edge, 99, ourPID, before) {
+		t.Fatal("XAML folder picker with our title")
+	}
+}
+
+func TestShouldRaiseDialogOver(t *testing.T) {
+	const dialog, owner, other uintptr = 0x200, 0x100, 0x300
+	// First time: always raise, even if we do not yet know the owner.
+	if !shouldRaiseDialogOver(owner, dialog, owner, true, false) {
+		t.Fatal("first raise over the confirm window")
+	}
+	if !shouldRaiseDialogOver(other, dialog, owner, false, false) {
+		t.Fatal("first raise even if another window is in front")
+	}
+	// Already raised: only fight BDDM windows that cover the picker.
+	if shouldRaiseDialogOver(dialog, dialog, owner, false, true) {
+		t.Fatal("already in front")
+	}
+	if !shouldRaiseDialogOver(owner, dialog, owner, true, true) {
+		t.Fatal("the confirm / owner window came back on top")
+	}
+	if !shouldRaiseDialogOver(other, dialog, owner, true, true) {
+		t.Fatal("another BDDM window came back on top")
+	}
+	if shouldRaiseDialogOver(other, dialog, owner, false, true) {
+		t.Fatal("must not fight a different app the user switched to")
+	}
+	if shouldRaiseDialogOver(other, 0, owner, true, false) {
+		t.Fatal("no dialog")
+	}
+}
+
+func TestKeepAppWindowFrontDuration(t *testing.T) {
+	if keepAppWindowFrontFor < time.Second || keepAppWindowFrontFor > 5*time.Second {
+		t.Fatalf("keepAppWindowFrontFor = %s, want a short retry so new windows stay in front", keepAppWindowFrontFor)
 	}
 }

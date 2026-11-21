@@ -1,6 +1,9 @@
 package main
 
-import "strings"
+import (
+	"strings"
+	"time"
+)
 
 // Known titles of BDDM's Edge/Chrome app windows (the <title> of each UI page,
 // plus the titles some pages set later). Used to find those windows so a
@@ -88,7 +91,16 @@ var fileDialogTitles = []string{
 }
 
 func isDialogClass(class string) bool {
-	return class == dialogWindowClass
+	switch class {
+	case dialogWindowClass, // #32770: classic / in-process IFileDialog
+		"XamlExplorerHostIslandWindow",
+		"WinUIDesktopWin32WindowClass",
+		"Windows.UI.Core.CoreWindow",
+		"Microsoft.UI.Content.DesktopChildSiteBridge",
+		"ApplicationFrameWindow":
+		return true
+	}
+	return false
 }
 
 func fileDialogTitleMatch(title string) bool {
@@ -116,12 +128,17 @@ func isCandidateFileDialog(class, title string, hwnd, winOwner, expectedOwner ui
 	if before[hwnd] {
 		return false
 	}
-	if isChromeWidgetClass(class) || isExplorerClass(class) {
+	if isChromeWidgetClass(class) {
 		return false
 	}
 	byClass := isDialogClass(class)
 	byTitle := fileDialogTitleMatch(title)
 	if !byClass && !byTitle {
+		return false
+	}
+	// Do not raise a random Explorer window. A Windows 11 folder picker
+	// may be Explorer-hosted, but it uses the title we set.
+	if isExplorerClass(class) && !byTitle {
 		return false
 	}
 	if dialogPID != 0 && pid == dialogPID {
@@ -130,6 +147,30 @@ func isCandidateFileDialog(class, title string, hwnd, winOwner, expectedOwner ui
 	if expectedOwner != 0 && winOwner == expectedOwner {
 		return true
 	}
-	// New picker with a title we set, even if the process id could not be read.
-	return byClass && byTitle
+	// Known title: accept even when the picker is hosted in another
+	// process and is not class #32770 (common on recent Windows).
+	return byTitle
 }
+
+// shouldRaiseDialogOver is true when the folder/file picker should be
+// brought in front of the current foreground window. The first time we
+// see the picker we always raise it. After that we only raise it if a
+// BDDM window (usually the one the user clicked Browse in) has come back
+// on top — we do not fight the user if they switched to another app.
+func shouldRaiseDialogOver(fg, dialog, owner uintptr, fgIsBDDM, alreadyRaised bool) bool {
+	if dialog == 0 || fg == dialog {
+		return false
+	}
+	if !alreadyRaised {
+		return true
+	}
+	if owner != 0 && fg == owner {
+		return true
+	}
+	return fgIsBDDM
+}
+
+// keepAppWindowFrontFor is how long we keep a newly opened BDDM window
+// in front after it first appears, in case the previous window takes
+// focus back (the same method used for the Add torrent window).
+const keepAppWindowFrontFor = 2 * time.Second

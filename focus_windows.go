@@ -73,6 +73,9 @@ type enumWnd struct {
 
 const raiseDialogFor = 1500 * time.Millisecond
 
+// raiseDialogMax is a safety cap if the stop function is never called.
+const raiseDialogMax = 10 * time.Minute
+
 var enumIncludeOwned bool
 var enumMinW, enumMinH int32 = 160, 80
 
@@ -134,39 +137,111 @@ func getCurrentProcessId() uint32 {
 	return uint32(r)
 }
 
+func clearTopmost(hwnd uintptr) {
+	if hwnd != 0 && isWindow(hwnd) {
+		setWindowPos(hwnd, hwndNotopmost, swpNomove|swpNosize)
+	}
+}
+
+func foregroundIsBDDM(fg, owner uintptr) bool {
+	if fg == 0 {
+		return false
+	}
+	root := getAncestor(fg, gaRoot)
+	if root == 0 {
+		root = fg
+	}
+	if owner != 0 && (fg == owner || root == owner) {
+		return true
+	}
+	tid, pid := windowThreadProcess(root)
+	w := enumWnd{hwnd: root, title: windowText(root), class: windowClass(root), pid: pid, tid: tid}
+	return w.isBDDMApp()
+}
+
 // raiseNewDialog looks for a folder or file picker that appeared after
 // Show started and brings that window (not its owner) to the front.
 // It retries for wait, then stops. A missing window is a no-op.
 func raiseNewDialog(before map[uintptr]bool, owner uintptr, dialogPID uint32, wait time.Duration) {
-	defer func() { recover() }()
 	if wait <= 0 {
 		wait = raiseDialogFor
 	}
+	stop := make(chan struct{})
+	time.AfterFunc(wait, func() { close(stop) })
+	raiseDialogUntil(stop, before, owner, dialogPID)
+}
+
+// watchFileDialog starts a watcher that keeps the picker in front of BDDM
+// windows until the returned stop function is called (when Show returns).
+// The Edge/Chrome owner stays enabled (it is another process), so we must
+// keep raising the dialog and hold it topmost for the life of the picker.
+func watchFileDialog(before map[uintptr]bool, owner uintptr, dialogPID uint32) func() {
+	stop := make(chan struct{})
+	var once sync.Once
+	go raiseDialogUntil(stop, before, owner, dialogPID)
+	return func() {
+		once.Do(func() { close(stop) })
+	}
+}
+
+func raiseDialogUntil(stop <-chan struct{}, before map[uintptr]bool, owner uintptr, dialogPID uint32) {
+	defer func() { recover() }()
 	if before == nil {
 		before = map[uintptr]bool{}
 	}
-	deadline := time.Now().Add(wait)
+	raised := map[uintptr]bool{}
+	defer func() {
+		for h := range raised {
+			clearTopmost(h)
+		}
+	}()
+	if owner != 0 {
+		clearTopmost(owner)
+	}
+	deadline := time.NewTimer(raiseDialogMax)
+	defer deadline.Stop()
+	tick := time.NewTicker(50 * time.Millisecond)
+	defer tick.Stop()
 	for {
 		for _, w := range enumPickerWindows() {
 			if !isCandidateFileDialog(w.class, w.title, w.hwnd, w.owner, owner, w.pid, dialogPID, before) {
 				continue
 			}
-			activateWindow(w.hwnd)
-			if getForegroundWindow() == w.hwnd {
-				return
+			fg := getForegroundWindow()
+			if shouldRaiseDialogOver(fg, w.hwnd, owner, foregroundIsBDDM(fg, owner), raised[w.hwnd]) {
+				activateWindow(w.hwnd)
+				// Stay above the cross-process Edge/Chrome owner.
+				setWindowPos(w.hwnd, hwndTopmost, swpNomove|swpNosize)
+				raised[w.hwnd] = true
 			}
 		}
-		if time.Now().After(deadline) {
+		select {
+		case <-stop:
 			return
+		case <-deadline.C:
+			return
+		case <-tick.C:
 		}
-		time.Sleep(50 * time.Millisecond)
 	}
 }
 
-// watchFileDialog starts a short-lived watcher that raises the picker while
-// Show (or the PowerShell dialog) is blocked, then returns immediately.
-func watchFileDialog(before map[uintptr]bool, owner uintptr, dialogPID uint32) {
-	go raiseNewDialog(before, owner, dialogPID, raiseDialogFor)
+// keepWindowInFront keeps raising hwnd for d, then leaves it as a normal
+// (not topmost) window. Used so a new BDDM app window stays in front.
+func keepWindowInFront(hwnd uintptr, d time.Duration) {
+	if hwnd == 0 || d <= 0 {
+		return
+	}
+	deadline := time.Now().Add(d)
+	for time.Now().Before(deadline) {
+		if !isWindow(hwnd) {
+			return
+		}
+		if getForegroundWindow() != hwnd {
+			activateWindow(hwnd)
+		}
+		time.Sleep(80 * time.Millisecond)
+	}
+	clearTopmost(hwnd)
 }
 
 func windowText(hwnd uintptr) string {
@@ -388,19 +463,26 @@ func newWindowsSince(before map[uintptr]bool) []enumWnd {
 
 func activateNewWindows(before map[uintptr]bool, match func(enumWnd) bool, wait time.Duration) bool {
 	deadline := time.Now().Add(wait)
-	for {
+	var found uintptr
+	for found == 0 {
 		for _, w := range newWindowsSince(before) {
 			if match == nil || match(w) {
 				if activateWindow(w.hwnd) {
-					return true
+					found = w.hwnd
+					break
 				}
 			}
+		}
+		if found != 0 {
+			break
 		}
 		if time.Now().After(deadline) {
 			return false
 		}
 		time.Sleep(80 * time.Millisecond)
 	}
+	keepWindowInFront(found, keepAppWindowFrontFor)
+	return true
 }
 
 func isNewBrowserWindow(w enumWnd) bool {

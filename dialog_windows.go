@@ -192,8 +192,12 @@ func showFileOpenDialog(owner uintptr, title, start string, folders bool, filter
 	// Show: that can keep it on top of the dialog, which lives in this
 	// process, not in msedge.exe. Watch for the dialog's own HWND and
 	// raise that instead.
+	if owner != 0 {
+		clearTopmost(owner)
+	}
 	before := snapshotPickerHWND()
-	watchFileDialog(before, owner, getCurrentProcessId())
+	stopWatch := watchFileDialog(before, owner, getCurrentProcessId())
+	defer stopWatch()
 	withForeground(func() {
 		r := comCall(dlg, 3, owner) // IModalWindow::Show
 		if hresult(r) == hresultCancelled || hresult(r) == 0x800704C7 {

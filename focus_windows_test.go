@@ -44,4 +44,13 @@ func TestPowershellPreludeRaisesDialogNotOwner(t *testing.T) {
 	if !strings.Contains(powershellDialogPrelude, "#32770") {
 		t.Fatal("expected the standard dialog class")
 	}
+	if strings.Contains(powershellDialogPrelude, "raiseN") {
+		t.Fatal("the PowerShell fallback must keep raising for as long as the dialog is open")
+	}
+	if !strings.Contains(powershellDialogPrelude, "FindWindow($null, $title)") {
+		t.Fatal("should also find the picker by title (Windows 11 may not use #32770)")
+	}
+	if !strings.Contains(powershellDialogPrelude, "Clear-BddmDialogTopMost") {
+		t.Fatal("should clear topmost when the picker closes")
+	}
 }
