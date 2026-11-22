@@ -12,7 +12,7 @@
 
 // Chrome/Edge/Brave run this as a service worker and load the shim here;
 // Firefox loads compat.js first from the manifest.
-if (typeof api === "undefined" && typeof importScripts === "function") importScripts("compat.js");
+if (typeof api === "undefined" && typeof importScripts === "function") importScripts("compat.js", "firefox_capture.js");
 
 const BDDM = "http://127.0.0.1:9614";
 const MIN_SIZE = 10 * 1024;            // smaller files stay in the browser
@@ -509,6 +509,30 @@ async function answerDuplicate(key, again) {
 const ownDownloads = new Set(); // downloads this extension started (hand-backs)
 let skipUntil = 0; // Alt+click: let the next download go to the browser
 
+// URLs Firefox cancelled at onHeadersReceived after BDDM took them, so a late
+// onCreated (if the browser still records the cancelled request) does not send again.
+const recentFirefoxIntercepts = new Map();
+const FIREFOX_INTERCEPT_TTL = 15 * 1000;
+
+function markFirefoxIntercept(url) {
+  if (!url) return;
+  const now = Date.now();
+  recentFirefoxIntercepts.set(url, now);
+  for (const [u, at] of recentFirefoxIntercepts) {
+    if (now - at > FIREFOX_INTERCEPT_TTL) recentFirefoxIntercepts.delete(u);
+  }
+}
+
+function wasFirefoxIntercepted(urls) {
+  const now = Date.now();
+  for (const u of urls || []) {
+    if (!u) continue;
+    const at = recentFirefoxIntercepts.get(u);
+    if (at && now - at < FIREFOX_INTERCEPT_TTL) return true;
+  }
+  return false;
+}
+
 async function shouldSkipByAlt() {
   if (Date.now() < skipUntil) { skipUntil = 0; return true; }
   const { skipUntil: s } = await api.storage.session.get({ skipUntil: 0 });
@@ -579,8 +603,14 @@ async function stopBrowserDownload(item) {
 // Decides about one browser download. Returns true when BDDM took it (the
 // browser download was cancelled), false when Chrome should keep it.
 async function capture(item) {
-  if (item.byExtensionId === api.runtime.id || ownDownloads.has(item.id)) return false; // we started it (hand-back)
+  if (item.byExtensionId === api.runtime.id || (item.id != null && ownDownloads.has(item.id))) return false; // we started it (hand-back)
   if (item.incognito) return false;
+  // A leftover Firefox download after we already cancelled the request at
+  // onHeadersReceived: just hide it. Do this even if the item is already complete.
+  if (IS_FIREFOX && wasFirefoxIntercepted([item.url, item.finalUrl])) {
+    if (item.id != null) await stopBrowserDownload(item);
+    return true;
+  }
   if (item.state && item.state !== "in_progress") return false;
   let url = item.finalUrl || item.url;
 
@@ -617,7 +647,9 @@ async function capture(item) {
 
   let size = item.totalBytes > 0 ? item.totalBytes : (item.fileSize > 0 ? item.fileSize : -1);
   const drive = isGoogleDriveDownload(url) || isGoogleDriveDownload(item.url);
-  if (size < 0 && !drive) size = await probeSize(url);
+  // The Firefox onHeadersReceived path must answer quickly; skip the extra
+  // HEAD when Content-Length was already missing (treated as large enough).
+  if (size < 0 && !drive && !item.skipProbe) size = await probeSize(url);
   if (size >= 0 && size < MIN_SIZE) return false;
 
   const filename = baseName(item.filename);
@@ -676,13 +708,72 @@ if (api.downloads.onDeterminingFilename) {
     return true; // we answer later
   });
 } else {
-  // Firefox has no onDeterminingFilename: the download has already started
-  // when onCreated fires, so it keeps running while we ask BDDM, and is
-  // cancelled and removed from the list only if BDDM takes it.
+  // Firefox has no onDeterminingFilename. onCreated is the fallback when the
+  // early onHeadersReceived intercept did not run (or BDDM was offline).
   api.downloads.onCreated.addListener((item) => {
     capture(item).catch(() => {});
   });
 }
+
+// Firefox only: cancel the HTTP response before Firefox's downloader starts,
+// so the user does not also get Firefox's own save / download. blob: and
+// data: URLs are never seen here (and shouldInterceptFirefoxDownload rejects
+// them). Chrome/Edge keep onDeterminingFilename above and do not register this.
+function isOwnOrLocalRequest(details) {
+  if (!details) return true;
+  if (details.incognito) return true;
+  const url = details.url || "";
+  if (url.indexOf(BDDM) === 0) return true;
+  const origin = details.originUrl || details.documentUrl || "";
+  if (/^(moz-extension|chrome-extension):/i.test(origin)) return true;
+  return false;
+}
+
+function itemFromWebRequest(details) {
+  const disp = typeof headerValue === "function" ? headerValue(details.responseHeaders, "content-disposition") : "";
+  const name = typeof filenameFromContentDisposition === "function" ? filenameFromContentDisposition(disp) : "";
+  const size = typeof contentLengthOf === "function" ? contentLengthOf(details.responseHeaders) : -1;
+  return {
+    url: details.url,
+    finalUrl: details.url,
+    filename: name,
+    totalBytes: size,
+    fileSize: size,
+    referrer: details.originUrl || details.documentUrl || "",
+    incognito: !!details.incognito,
+    cookieStoreId: details.cookieStoreId,
+    tabId: details.tabId,
+    skipProbe: true,
+  };
+}
+
+async function captureFirefoxRequest(details) {
+  const item = itemFromWebRequest(details);
+  const taken = await capture(item);
+  if (taken) markFirefoxIntercept(item.url);
+  return taken;
+}
+
+function onFirefoxHeadersReceived(details) {
+  if (isOwnOrLocalRequest(details)) return;
+  if (typeof shouldInterceptFirefoxDownload !== "function" || !shouldInterceptFirefoxDownload(details)) return;
+  return captureFirefoxRequest(details).then((taken) => (taken ? { cancel: true } : {})).catch(() => ({}));
+}
+
+function installFirefoxEarlyCapture() {
+  if (!IS_FIREFOX || !api.webRequest || !api.webRequest.onHeadersReceived) return;
+  try {
+    api.webRequest.onHeadersReceived.addListener(
+      onFirefoxHeadersReceived,
+      { urls: ["http://*/*", "https://*/*"], types: ["main_frame", "sub_frame", "object", "other"] },
+      ["blocking", "responseHeaders"]
+    );
+  } catch (e) {
+    // No webRequestBlocking: onCreated remains the fallback.
+  }
+}
+
+installFirefoxEarlyCapture();
 
 // ---------------------------------------------------------------- right-click menu
 

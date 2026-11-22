@@ -30,16 +30,16 @@
     "#1": {
       "0409": {
         "fixed": {
-          "file_version": "1.4.14.0",
-          "product_version": "1.4.14.0"
+          "file_version": "1.4.15.0",
+          "product_version": "1.4.15.0"
         },
         "info": {
           "0409": {
             "FileDescription": "BDDM Download Manager",
-            "FileVersion": "1.4.14.0",
+            "FileVersion": "1.4.15.0",
             "OriginalFilename": "BDDM.exe",
             "ProductName": "BDDM",
-            "ProductVersion": "1.4.14.0"
+            "ProductVersion": "1.4.15.0"
           }
         }
       }

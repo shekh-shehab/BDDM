@@ -13,12 +13,24 @@ import json, os, shutil, zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.dirname(HERE)
-FILES = ["background.js", "videos.js", "compat.js", "content.js", "popup.html", "popup.css", "popup.js", "dup.html", "dup.js", "savepdf.js", "savepdf-bg.js"]
+FILES = ["background.js", "videos.js", "compat.js", "firefox_capture.js", "content.js", "popup.html", "popup.css", "popup.js", "dup.html", "dup.js", "savepdf.js", "savepdf-bg.js"]
 
 
 def merge(a, b):
+    # Append permission lists instead of replacing them, so firefox.json can
+    # add "webRequestBlocking" without copying the whole permissions array.
+    LIST_KEYS = ("permissions", "host_permissions", "optional_permissions")
     for k, v in b.items():
-        a[k] = merge(a.get(k, {}), v) if isinstance(v, dict) and isinstance(a.get(k), dict) else v
+        if k in LIST_KEYS and isinstance(v, list) and isinstance(a.get(k), list):
+            seen = set(a[k])
+            for item in v:
+                if item not in seen:
+                    a[k].append(item)
+                    seen.add(item)
+        elif isinstance(v, dict) and isinstance(a.get(k), dict):
+            a[k] = merge(a.get(k, {}), v)
+        else:
+            a[k] = v
     return a
 
 

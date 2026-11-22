@@ -2,6 +2,7 @@
   "background": {
     "scripts": [
       "compat.js",
+      "firefox_capture.js",
       "background.js",
       "videos.js",
       "savepdf-bg.js"
@@ -46,5 +47,8 @@
       "all_frames": true,
       "run_at": "document_idle"
     }
+  ],
+  "permissions": [
+    "webRequestBlocking"
   ]
 }
