@@ -28,7 +28,7 @@ import (
 const port = "9614"
 
 // appVersion is the BDDM version shown in Settings and on the update notice.
-const appVersion = "1.4.15"
+const appVersion = "1.4.16"
 
 func main() {
 	noWindow := flag.Bool("nowindow", false, "do not open the window (run in the background)")
@@ -65,7 +65,7 @@ func main() {
 			for _, u := range flag.Args() {
 				sendToRunning(appURL, u)
 			}
-			fmt.Println("BDDM is already running.")
+			log.Print("BDDM is already running.")
 			if !*noWindow {
 				_ = openAppWindow(appURL)
 			}
@@ -113,7 +113,7 @@ func main() {
 	upd.quitFn = quit
 	srv.Handler = newServer(m, port, quit, upd)
 
-	// Ctrl+C in the terminal also stops cleanly.
+	// Interrupt also stops cleanly when BDDM is run from a terminal (go run).
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt)
 	go func() {
@@ -149,18 +149,18 @@ func main() {
 		}
 	}
 
-	fmt.Println("BDDM is running at " + appURL)
-	fmt.Println("Data folder: " + configDir)
-	fmt.Println("Close the window any time; use the Quit button (or Ctrl+C here) to stop BDDM.")
+	log.Print("BDDM is running at " + appURL)
+	log.Print("Data folder: " + configDir)
+	log.Print("Close the window any time; use the Quit button in the window to stop BDDM.")
 	if !*noWindow {
 		if err := openAppWindow(appURL); err != nil {
-			fmt.Println("Could not open the window:", err)
-			fmt.Println("Open " + appURL + " in your browser.")
+			log.Printf("Could not open the window: %v", err)
+			log.Print("Open " + appURL + " in your browser.")
 		}
 	}
 
 	<-stopped
-	fmt.Println("BDDM stopped.")
+	log.Print("BDDM stopped.")
 }
 
 // setupLog writes the log to bddm.log (and to the console when there is one).

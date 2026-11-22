@@ -15,7 +15,7 @@ Target amd64-unicode
 !insertmacro GetOptions
 
 !ifndef VERSION
-  !define VERSION "1.4.15"
+  !define VERSION "1.4.16"
 !endif
 !define APP "BDDM"
 !define APPNAME "BDDM Download Manager"

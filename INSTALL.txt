@@ -92,8 +92,17 @@ Firefox
     extension\manifests\base.json before signing.
 
 
-3. What is new in 1.4.15
+3. What is new in 1.4.16
 ------------------------
+The browser extension is unchanged (still 1.4.15). You do not need to
+reload or reinstall it.
+- BDDM no longer opens a console or Windows Terminal tab when it starts
+  after an update, from a shortcut, or when Windows starts. Status and
+  download messages are written to a log file in the BDDM data folder
+  (%APPDATA%\BDDM\bddm.log).
+
+4. What was new in 1.4.15
+-------------------------
 The browser extension is now 1.4.15. Chrome, Edge and Brave keep the
 same capture behaviour; reload the unpacked extension (or the new zip)
 if you already have it installed.
@@ -108,7 +117,7 @@ place with this file — open the new .xpi (or drag it onto about:addons).
 - Files the page itself makes (blob: or data: links, including Send
   Anywhere-style transfers) stay in Firefox. BDDM does not intercept them.
 
-4. What was new in 1.4.14
+5. What was new in 1.4.14
 -------------------------
 The browser extension was unchanged in 1.4.14 (still 1.4.2.1). You do not
 need to reload or reinstall it for that update.
@@ -119,7 +128,7 @@ need to reload or reinstall it for that update.
   in front of the BDDM window you opened them from, instead of appearing
   behind it.
 
-5. What was new in 1.4.13
+6. What was new in 1.4.13
 -------------------------
 The browser extension is unchanged (still 1.4.2.1). You do not need to
 reload or reinstall it.
@@ -130,7 +139,7 @@ reload or reinstall it.
   update BDDM start again automatically. Torrents you paused yourself
   stay paused.
 
-6. What was new in 1.4.12
+7. What was new in 1.4.12
 -------------------------
 The browser extension is unchanged (still 1.4.2.1). You do not need to
 reload or reinstall it.
@@ -143,7 +152,7 @@ reload or reinstall it.
   and pin BDDM again from the Start menu. Windows may also keep an old
   icon until you sign out or restart.
 
-7. What was new in 1.4.11
+8. What was new in 1.4.11
 -------------------------
 - BDDM has a new icon. You will see it on the app, the installer, the
   Start menu and desktop shortcuts, and in the window. Windows may keep
@@ -154,7 +163,7 @@ may still show the previous icon. A later signed build will include the
 new one. If you use the Chromium extension (Chrome, Edge, Brave), load
 the new zip from this release to get the new icon.
 
-8. What was new in 1.4.10
+9. What was new in 1.4.10
 -------------------------
 The browser extension is unchanged (still 1.4.2.1). You do not need to
 reload or reinstall it.
@@ -166,8 +175,8 @@ reload or reinstall it.
   files are only deleted if you choose to delete them.
 
 
-9. What was new in 1.4.9
-------------------------
+10. What was new in 1.4.9
+-------------------------
 The browser extension is unchanged (still 1.4.2.1). You do not need to
 reload or reinstall it.
 - The Add torrent window (for a magnet link or a .torrent file) remembers
@@ -176,7 +185,7 @@ reload or reinstall it.
   folder. If that saved folder is no longer there, BDDM uses your usual
   download folder instead.
 
-10. What was new in 1.4.8
+11. What was new in 1.4.8
 -------------------------
 The browser extension is unchanged (still 1.4.2.1). You do not need to
 reload or reinstall it.
@@ -186,7 +195,7 @@ reload or reinstall it.
   and say if a picker is still hidden.
 
 
-11. What was new in 1.4.7
+12. What was new in 1.4.7
 -------------------------
 The browser extension is unchanged (still 1.4.2.1). You do not need to
 reload or reinstall it.
@@ -199,7 +208,7 @@ reload or reinstall it.
   Off returns the download to the Settings cap.
 
 
-12. What was new in 1.4.6
+13. What was new in 1.4.6
 -------------------------
 The browser extension is unchanged (still 1.4.2.1). You do not need to
 reload or reinstall it.
@@ -211,7 +220,7 @@ reload or reinstall it.
   the browser extension) brings the existing window to the front.
 
 
-13. What was new in 1.4.5
+14. What was new in 1.4.5
 -------------------------
 The browser extension is unchanged (still 1.4.2.1). You do not need to
 reload or reinstall it.
@@ -227,7 +236,7 @@ reload or reinstall it.
   through the firewall so other peers can connect.
 
 
-14. What was new in 1.4.4
+15. What was new in 1.4.4
 -------------------------
 The browser extension is unchanged (still 1.4.2.1). You do not need to
 reload or reinstall it.
@@ -242,7 +251,7 @@ reload or reinstall it.
   downloading.
 
 
-15. What was new in 1.4.3
+16. What was new in 1.4.3
 -------------------------
 The browser extension is unchanged (still 1.4.2.1). You do not need to
 reload or reinstall it.
@@ -254,7 +263,7 @@ reload or reinstall it.
   "Check for updates" button next to the version number.
 
 
-16. What was new in 1.4.2
+17. What was new in 1.4.2
 -------------------------
 Update the browser extension too (click its reload button on the
 extensions page, or install the new BDDM-firefox-signed.xpi in Firefox).
@@ -289,7 +298,7 @@ only once).
   explanation.
 
 
-17. What was new in 1.4.1
+18. What was new in 1.4.1
 -------------------------
 Fewer "HTTP 403 Forbidden" errors on sites where the browser itself can
 download (update the browser extension too: click its reload button on the
@@ -309,7 +318,7 @@ extensions page, or install the new BDDM-firefox-signed.xpi in Firefox):
 - When a site still refuses, BDDM says so plainly and explains what to do.
 
 
-18. What was new in 1.4.0
+19. What was new in 1.4.0
 -------------------------
 - Internet drops: downloads wait ("No internet connection. BDDM
   continues automatically when the connection is back") and continue by
@@ -336,7 +345,7 @@ extensions page, or install the new BDDM-firefox-signed.xpi in Firefox):
 - Errors are explained in plain words, with what to do about them.
 
 
-19. What was new in 1.3.0
+20. What was new in 1.3.0
 -------------------------
 - Folders by file type: Settings > "Folders by file type" sets a folder
   for Video, Audio, Documents, Compressed, Programs, Images and Other.
