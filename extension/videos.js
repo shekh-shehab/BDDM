@@ -8,41 +8,15 @@
 // The toolbar badge shows how many videos the current tab has.
 // "Download with BDDM" sends {url, referer, cookie, kind:"video", title} to
 // BDDM, which opens its "Download Video" window (quality, audio only, ...).
+// Disguised playlist helpers (classify, auto-offer, Firefox body filter) live
+// in hls_capture.js, loaded first.
 
-const VIDEO_SITES = [
-  [/(^|\.)youtube\.com$/, /^\/(watch|shorts\/|live\/|playlist|embed\/)/],
-  [/^youtu\.be$/, /^\/[\w-]{6,}/],
-  [/(^|\.)facebook\.com$/, /^\/(watch|reel\/|share\/[vr]\/|[^/]+\/videos\/|video\.php|videos\/)/],
-  [/^fb\.watch$/, /^\/./],
-  [/(^|\.)instagram\.com$/, /^\/(p|reel|reels|tv)\//],
-  [/(^|\.)tiktok\.com$/, /^\/(@[^/]+\/video\/|t\/|v\/)/],
-  [/(^|\.)vimeo\.com$/, /^\/(\d+|channels\/|showcase\/)/],
-  [/(^|\.)dailymotion\.com$/, /^\/video\//],
-  [/^(x|twitter|mobile\.twitter|mobile\.x)\.com$/, /^\/[^/]+\/status\/\d+/],
-  [/(^|\.)twitch\.tv$/, /^\/(videos\/|[^/]+\/clip\/)/],
-  [/(^|\.)reddit\.com$/, /^\/r\/[^/]+\/comments\//],
-  [/(^|\.)bilibili\.com$/, /^\/video\//],
-];
-// Sites whose players load many small pieces: the page link is enough.
-const PAGE_ONLY_HOSTS = /(^|\.)(youtube\.com|googlevideo\.com|ytimg\.com|facebook\.com|fbcdn\.net|instagram\.com|cdninstagram\.com|tiktok\.com|tiktokcdn\.com|tiktokcdn-us\.com|tiktokv\.com|byteoversea\.com|ibyteimg\.com|twimg\.com|x\.com|twitter\.com)$/;
+if (typeof classify !== "function" && typeof importScripts === "function") importScripts("hls_capture.js");
+
 const MAX_PER_TAB = 20;
-const MIN_FILE = 1024 * 1024; // direct video files smaller than this are skipped
-const SEGMENT_RE = /\.(ts|m4s|m4v|m4a|aac|cmfv|cmfa|vtt|webvtt|key|jpg|png)(\?|$)|\/seg(ment)?[-_]?\d+|[?&](range|bytestart)=|\/(chunk|frag(ment)?)[-_]?\d+/i;
 
 const tabVideos = new Map(); // tabId -> {page: url, list: [{url, kind, label, title, master}]}
 let tabsLoaded = null;
-
-function videoPageInfo(u) {
-  let x;
-  try { x = new URL(u); } catch (e) { return false; }
-  if (!/^https?:$/.test(x.protocol)) return false;
-  const host = x.hostname.toLowerCase().replace(/^(www|m|mobile|web)\./, "");
-  return VIDEO_SITES.some(([h, p]) => h.test(host) && p.test(x.pathname));
-}
-
-function pageKey(u) {
-  try { const x = new URL(u); x.hash = ""; return x.href; } catch (e) { return u || ""; }
-}
 
 async function loadTabs() {
   if (!tabsLoaded) {
@@ -83,11 +57,12 @@ function entryFor(tabId, page) {
 
 function addVideo(tabId, page, v) {
   const t = entryFor(tabId, page);
-  if (t.list.some((x) => x.url === v.url)) return;
-  if (t.list.length >= MAX_PER_TAB) return;
+  if (t.list.some((x) => x.url === v.url)) return false;
+  if (t.list.length >= MAX_PER_TAB) return false;
   if (v.kind === "page") t.list.unshift(v); else t.list.push(v);
   saveTabs();
   updateBadge(tabId);
+  return true;
 }
 
 function removeVideo(tabId, url) {
@@ -133,64 +108,57 @@ api.tabs.onRemoved.addListener((tabId) => {
   loadTabs().then(() => { if (tabVideos.delete(tabId)) saveTabs(); });
 });
 
-// Streams and video files the pages load.
-function headerOf(details, name) {
-  const h = (details.responseHeaders || []).find((x) => x.name.toLowerCase() === name);
-  return h ? String(h.value || "") : "";
-}
-
-// Playlists in disguise (1.4.2, e.g. movielink): no ".m3u8" in the address
-// and sent as a picture or plain data. Worth a look at the content when the
-// player itself asked for it (XHR/fetch, not an <img>) and it is either at
-// a playlist-like address ("/m/...", "/hls/...") or small.
-const MAYBE_HLS_PATH_RE = /\/(m|hls|playlist|manifest)\//i;
-const MAYBE_HLS_TYPES = /^(image\/|text\/plain$|application\/octet-stream$|binary\/octet-stream$|$)/;
-const MAYBE_HLS_MAX = 512 * 1024;
-
-function maybeHidden(details, path, ct) {
-  if (details.type !== "xmlhttprequest" && details.type !== "other") return false;
-  if (!MAYBE_HLS_TYPES.test(ct)) return false;
-  if (/\.(ts|m4s|mp4|m4a|aac|vtt|webvtt|key|js|css|json|html?|woff2?)(\?|$)/i.test(path)) return false;
-  const len = parseInt(headerOf(details, "content-length") || "-1", 10);
-  if (len > MAYBE_HLS_MAX) return false;
-  if (MAYBE_HLS_PATH_RE.test(path)) return true;
-  return ct.startsWith("image/") && len >= 0 && len <= 64 * 1024 && !/\.(png|jpe?g|gif|webp|svg|ico|avif|bmp)(\?|$)/i.test(path);
-}
-
-function classify(details) {
-  const u = details.url;
-  let path = "";
-  try { path = new URL(u).pathname.toLowerCase(); } catch (e) { return ""; }
-  const ct = headerOf(details, "content-type").toLowerCase().split(";")[0].trim();
-  if (path.endsWith(".m3u8") || ct === "application/vnd.apple.mpegurl" || ct === "application/x-mpegurl" || ct === "audio/mpegurl") return "hls";
-  if (maybeHidden(details, path, ct)) return "maybe-hls";
-  if (path.endsWith(".mpd") || ct === "application/dash+xml") return "dash";
-  if (ct.startsWith("video/") && ct !== "video/mp2t" && ct !== "video/iso.segment" && !SEGMENT_RE.test(u)) {
-    let size = -1;
-    const cr = headerOf(details, "content-range").match(/\/(\d+)\s*$/);
-    if (cr) size = parseInt(cr[1], 10);
-    else if (details.statusCode === 200) size = parseInt(headerOf(details, "content-length") || "-1", 10);
-    if (size >= MIN_FILE) return "file";
-  }
-  return "";
-}
-
 // HLS pages load a master playlist and then one playlist per quality; only
 // the master is worth listing (BDDM offers all its qualities).
 // Some sites put extra bytes before "#EXTM3U", and some encrypt the whole
 // playlist (then it has no "#EXTM3U" at all and is marked "encrypted").
-// peekPlaylist reads the start of a playlist. First from the frame that
-// loaded it (content.js: the request then has the player's Origin and
-// Referer, which servers like movielink's check), then from here.
+// peekPlaylist reads the start of a playlist. First from the original
+// response (Firefox filterResponseData, pass-through), then from the frame
+// that loaded it (content.js: omit credentials first, then include, so
+// CORS "*" playlists work and the request has the player's Origin/Referer),
+// then from here with the player Origin/Referer when the browser allows it.
 // Our own looks (made from the page, so the browser reports them like the
 // page's requests): remembered so they are not looked at again (a loop),
 // and their answers are kept for a minute.
 const ownPeeks = new Map(); // url -> {at, result}
 const PEEK_TTL = 60000;
+const pendingBodies = new Map(); // requestId -> {promise, resolve}
+const capturedBodies = new Map(); // url -> {at, result}
+const offeredStreams = new Set(); // autoOfferKey values
 
 function ownPeek(url) {
   const p = ownPeeks.get(url);
   return p && Date.now() - p.at < PEEK_TTL ? p : null;
+}
+
+function rememberFilterBody(details, result) {
+  if (details && result && result.text) {
+    capturedBodies.set(details.url, { at: Date.now(), result });
+    while (capturedBodies.size > 80) capturedBodies.delete(capturedBodies.keys().next().value);
+  }
+  if (details && pendingBodies.has(details.requestId)) {
+    const p = pendingBodies.get(details.requestId);
+    if (p && p.resolve) p.resolve(result);
+    pendingBodies.delete(details.requestId);
+  }
+}
+
+function waitFilterBody(details, ms) {
+  if (!details) return Promise.resolve(null);
+  const known = capturedBodies.get(details.url);
+  if (known && Date.now() - known.at < PEEK_TTL) return Promise.resolve(known.result);
+  const pending = pendingBodies.get(details.requestId);
+  if (!pending) return Promise.resolve(null);
+  return Promise.race([pending.promise, new Promise((r) => setTimeout(() => r(null), ms))]);
+}
+
+function startFilterCapture(details) {
+  if (!api.webRequest || !api.webRequest.filterResponseData) return;
+  let resolve;
+  const promise = new Promise((r) => { resolve = r; });
+  pendingBodies.set(details.requestId, { promise, resolve });
+  const filter = api.webRequest.filterResponseData(details.requestId);
+  attachPlaylistFilter(details, filter, rememberFilterBody);
 }
 
 async function peekPlaylist(url, details) {
@@ -205,29 +173,48 @@ async function peekPlaylist(url, details) {
 }
 
 async function peekPlaylistNow(url, details) {
+  const filtered = await waitFilterBody(details, 1500);
+  if (filtered && playlistText(filtered.text) && !isForbiddenPlaylist(filtered.text)) return filtered;
+
   if (details && details.tabId >= 0) {
     try {
       const r = await Promise.race([
         api.tabs.sendMessage(details.tabId, { type: "peekPlaylist", url }, { frameId: details.frameId || 0 }),
         new Promise((res) => setTimeout(() => res(null), 7000)),
       ]);
-      if (r && r.ok && r.status < 400) return { ok: true, text: String(r.text || "") };
+      if (r && (r.ok || (r.status && r.status < 400)) && playlistText(r.text) && !isForbiddenPlaylist(r.text)) {
+        return { ok: true, status: r.status, text: String(r.text || "") };
+      }
     } catch (e) { /* no content script in that frame */ }
   }
-  try {
-    const r = await fetchTimeout(url, { credentials: "include" }, 5000);
-    if (!r.ok) return { ok: false, text: "" };
-    return { ok: true, text: (await r.text()).slice(0, 200000) };
-  } catch (e) {
-    return { ok: false, text: "" };
+  const headers = typeof peekRequestHeaders === "function" ? peekRequestHeaders(details, details && details.documentUrl) : {};
+  const modes = typeof peekCredentialModes === "function" ? peekCredentialModes() : ["omit", "include"];
+  let last = { ok: false, text: "", status: 0 };
+  for (const creds of modes) {
+    try {
+      const opts = { credentials: creds, cache: "no-store" };
+      let r;
+      try {
+        if (headers && Object.keys(headers).length) opts.headers = headers;
+        r = await fetchTimeout(url, opts, 5000);
+      } catch (e) {
+        // Extensions may not set Origin/Referer; retry without them.
+        if (opts.headers) {
+          delete opts.headers;
+          r = await fetchTimeout(url, opts, 5000);
+        } else {
+          throw e;
+        }
+      }
+      const text = (await r.text()).slice(0, 200000);
+      last = { ok: !!r.ok, status: r.status, text };
+      if (last.status < 400 && playlistText(text) && !isForbiddenPlaylist(text)) return last;
+      if (last.status < 400 && last.ok && last.text && !playlistText(text)) return last;
+    } catch (e) {
+      last = { ok: false, text: "", status: 0, error: String(e) };
+    }
   }
-}
-
-// Cuts anything before "#EXTM3U" (some sites add bytes); "" when the text
-// is no playlist.
-function playlistText(text) {
-  const at = String(text || "").indexOf("#EXTM3U");
-  return at < 0 || at > 4096 ? "" : text.slice(at);
+  return last;
 }
 
 async function hlsIsVariant(url, details, pre) {
@@ -247,23 +234,8 @@ async function hlsIsVariant(url, details, pre) {
   }
 }
 
-// The folder of a link ("https://cdn/x/y/" for https://cdn/x/y/index.m3u8?t=1).
-function folderOf(u) {
-  try { const x = new URL(u); return x.origin + x.pathname.replace(/[^/]*$/, ""); } catch (e) { return ""; }
-}
-
 function isMasterName(u) {
   try { return /(^|\/)master[^/]*\.m3u8$/i.test(new URL(u).pathname); } catch (e) { return false; }
-}
-
-// Base64 text or binary data instead of a playlist.
-function looksEncrypted(text) {
-  const t = String(text || "").trim();
-  if (t.length < 32) return false;
-  if (/^[A-Za-z0-9+/=_\-\s]+$/.test(t)) return true;
-  let bin = 0;
-  for (let i = 0; i < Math.min(t.length, 2000); i++) { const c = t.charCodeAt(i); if (c < 9 || (c > 126 && c < 160)) bin++; }
-  return bin * 10 > Math.min(t.length, 2000);
 }
 
 // The page (or embedded player frame) that loaded a request: sites often
@@ -323,18 +295,21 @@ async function onMediaResponse(details) {
   if (kind === "maybe-hls") {
     // Look at the content once per address; give up on a folder after
     // three answers that are not playlists (its pieces, real pictures).
+    // A 403 or failed refetch must not drop a stream the tab already got.
     if ((t.hlsChildren || []).includes(details.url)) return;
     const folder = folderOf(details.url);
     t.notHls = t.notHls || {};
     t.peeks = (t.peeks || 0) + 1;
     if ((t.notHls[folder] || 0) >= 3 || t.peeks > 60) return;
     const r = await peekPlaylist(details.url, details);
-    if (!r.ok || !playlistText(r.text)) {
+    const action = peekConfirmAction(details, r);
+    if (action === "drop") {
       t.notHls[folder] = (t.notHls[folder] || 0) + 1;
       return;
     }
     kind = "hls";
-    details = Object.assign({}, details, { peeked: r });
+    if (action === "playlist") details = Object.assign({}, details, { peeked: r });
+    else details = Object.assign({}, details, { peeked: { ok: false, text: "", keep: true } });
   }
   if (kind === "hls") {
     if ((t.hlsChildren || []).includes(details.url)) return; // a quality of a listed master
@@ -358,13 +333,35 @@ async function onMediaResponse(details) {
       for (const c of r.children) removeVideo(details.tabId, c);
     }
     if (r.variant && t.list.some((x) => x.kind === "hls" && x.master)) return;
-    addVideo(details.tabId, tab.url, { url: details.url, kind, master: !r.variant, title: tab.title || "",
+    const v = { url: details.url, kind, master: !r.variant, title: tab.title || "",
       label: streamLabel(details.url, kind) + (r.encrypted ? " (encrypted)" : ""), encrypted: !!r.encrypted,
-      frame: frameOf(details, tab.url) });
+      frame: frameOf(details, tab.url) };
+    if (addVideo(details.tabId, tab.url, v)) maybeAutoOffer(tab, v);
     return;
   }
-  addVideo(details.tabId, tab.url, { url: details.url, kind, title: tab.title || "", label: streamLabel(details.url, kind),
-    frame: frameOf(details, tab.url) });
+  const v = { url: details.url, kind, title: tab.title || "", label: streamLabel(details.url, kind),
+    frame: frameOf(details, tab.url) };
+  if (addVideo(details.tabId, tab.url, v)) maybeAutoOffer(tab, v);
+}
+
+async function maybeAutoOffer(tab, v) {
+  // YouTube, Facebook and other sites with their own flow are skipped
+  // inside shouldAutoOfferStream; only disguised/HLS (and DASH) on other
+  // sites are offered, once per page+stream.
+  if (!tab || !shouldAutoOfferStream(tab.url, v)) return;
+  const key = autoOfferKey(tab.url, v.url);
+  if (offeredStreams.has(key)) return;
+  offeredStreams.add(key);
+  while (offeredStreams.size > 200) offeredStreams.delete(offeredStreams.keys().next().value);
+  const res = await sendVideo(v.url, tab, tab.title);
+  if (res.kind === "ok" || res.kind === "window" || res.kind === "duplicate") {
+    notify("Sent to BDDM", "Choose the quality in the BDDM window.");
+  } else if (res.kind === "offline") {
+    notify("BDDM is not running", "Start BDDM first, then try again.");
+  } else {
+    offeredStreams.delete(key);
+    notify("BDDM could not add this video", res.error || "");
+  }
 }
 
 if (api.webRequest && api.webRequest.onHeadersReceived) {
@@ -373,6 +370,22 @@ if (api.webRequest && api.webRequest.onHeadersReceived) {
     { urls: ["http://*/*", "https://*/*"], types: ["xmlhttprequest", "media", "other", "object", "sub_frame"] },
     ["responseHeaders"]
   );
+  // Firefox only: read the original disguised-playlist body (the page already
+  // got a 200) and pass every byte through unchanged so playback is not
+  // broken. Never attached on YouTube/Facebook/normal files/Drive/ordinary
+  // .m3u8 (shouldFilterDisguisedPlaylist). Chromium has no filterResponseData
+  // on this MV3 path and must not get a blocking listener.
+  if (typeof IS_FIREFOX !== "undefined" && IS_FIREFOX && api.webRequest.filterResponseData) {
+    api.webRequest.onHeadersReceived.addListener(
+      (d) => {
+        try {
+          if (shouldFilterDisguisedPlaylist(d, ownPeek)) startFilterCapture(d);
+        } catch (e) { /* leave the response alone */ }
+      },
+      { urls: ["http://*/*", "https://*/*"], types: ["xmlhttprequest", "other"] },
+      ["blocking", "responseHeaders"]
+    );
+  }
 }
 
 // ---------------------------------------------------------------- popup and menu
@@ -387,6 +400,16 @@ async function videosForTab(tabId) {
   return t ? t.list : [];
 }
 
+function ensureReqOrigin(req, frame, tabUrl) {
+  const have = req.headers && (req.headers.Origin || req.headers.origin);
+  if (have) {
+    if (req.headers && !req.headers.Origin) req.headers.Origin = have;
+    return;
+  }
+  const o = originFromURL(frame) || originFromURL(req.referer) || originFromURL(tabUrl);
+  if (o) req.headers = Object.assign({}, req.headers || {}, { Origin: o });
+}
+
 async function sendVideo(url, tab, title) {
   const tabUrl = tab && isWebUrl(tab.url) ? tab.url : "";
   // A stream seen on this tab: send the player frame that loaded it as the
@@ -397,17 +420,23 @@ async function sendVideo(url, tab, title) {
     const t = tabVideos.get(tab.id);
     v = t ? t.list.find((x) => x.url === url) : null;
   }
-  const referer = v && isWebUrl(v.frame) ? v.frame : tabUrl;
+  const frame = v && isWebUrl(v.frame) ? v.frame : "";
+  const referer = (v && (v.kind === "hls" || v.kind === "dash") && frame) ? frame : (frame || tabUrl);
+  const cookieRef = frame || tabUrl;
   const req = {
     // 1.4.2: the player frame and the tab's page, so BDDM can try the other
     // Referers when the video server refuses the first one (HTTP 403).
-    frame: v && isWebUrl(v.frame) ? v.frame : "", page: tabUrl,
+    frame, page: tabUrl,
     // A video file itself ("file") goes to BDDM's fast engine, not yt-dlp.
     url, referer, kind: v && v.kind === "file" ? "media" : "video", title: title || (tab && tab.title) || "",
     stream: v && (v.kind === "hls" || v.kind === "dash") ? v.kind : "",
-    cookie: await cookieHeader(url, { referer: tabUrl, storeId: tab && tab.cookieStoreId }),
+    cookie: await cookieHeader(url, { referer: cookieRef, storeId: tab && tab.cookieStoreId }),
   };
-  await withBrowserDetails(req, [url], { referer: tabUrl, storeId: tab && tab.cookieStoreId });
+  await withBrowserDetails(req, [url], { referer: cookieRef, storeId: tab && tab.cookieStoreId });
+  if (v && (v.kind === "hls" || v.kind === "dash")) {
+    if (frame && (!req.referer || /^https?:\/\/[^/]+\/?$/.test(req.referer))) req.referer = frame;
+    ensureReqOrigin(req, frame, tabUrl);
+  }
   return sendToBDDM(req);
 }
 
@@ -433,21 +462,37 @@ api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 function createVideoMenu() {
   api.contextMenus.create({
     id: "bddm-video-page", title: "Download this video with BDDM", contexts: ["page", "video"],
-    documentUrlPatterns: ["*://*.youtube.com/*", "*://youtu.be/*", "*://*.facebook.com/*", "*://*.instagram.com/*",
-      "*://*.tiktok.com/*", "*://*.vimeo.com/*", "*://vimeo.com/*", "*://*.dailymotion.com/*", "*://x.com/*",
-      "*://twitter.com/*", "*://*.twitch.tv/*", "*://*.reddit.com/*", "*://*.bilibili.com/*"],
+    documentUrlPatterns: ["http://*/*", "https://*/*"],
   }, () => void api.runtime.lastError);
+}
+
+function detectedStream(tab) {
+  if (!tab) return null;
+  const t = tabVideos.get(tab.id);
+  if (!t || !t.list) return null;
+  return t.list.find((x) => x.kind === "hls" || x.kind === "dash") || t.list.find((x) => x.kind === "file") || null;
 }
 
 api.contextMenus.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId !== "bddm-video-page") return;
   const url = info.pageUrl || (tab && tab.url) || "";
-  if (!videoPageInfo(url)) {
-    notify("BDDM", "Open the video itself first (its own page), then try again.");
+  // YouTube, Facebook and other video-page sites keep the existing flow
+  // (the page address is sent). Other sites send a detected stream.
+  if (videoPageInfo(url)) {
+    const res = await sendVideo(url, tab, tab && tab.title);
+    if (res.kind === "ok") notify("Sent to BDDM", "Choose the quality in the BDDM window.");
+    else if (res.kind === "offline") notify("BDDM is not running", "Start BDDM first, then try again.");
+    else notify("BDDM could not add this video", res.error || "");
     return;
   }
-  const res = await sendVideo(url, tab, tab && tab.title);
-  if (res.kind === "ok") notify("Sent to BDDM", "Choose the quality in the BDDM window.");
-  else if (res.kind === "offline") notify("BDDM is not running", "Start BDDM first, then try again.");
-  else notify("BDDM could not add this video", res.error || "");
+  await loadTabs();
+  const v = detectedStream(tab);
+  if (v) {
+    const res = await sendVideo(v.url, tab, tab && tab.title);
+    if (res.kind === "ok") notify("Sent to BDDM", "Choose the quality in the BDDM window.");
+    else if (res.kind === "offline") notify("BDDM is not running", "Start BDDM first, then try again.");
+    else notify("BDDM could not add this video", res.error || "");
+    return;
+  }
+  notify("BDDM", "No video was found on this page.");
 });

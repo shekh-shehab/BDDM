@@ -655,9 +655,7 @@ func (m *Manager) hlsGet(ctx context.Context, j *Job, seg hlsSeg, limit int64) (
 	if err != nil {
 		return nil, 0, err
 	}
-	if o := originOf(j.Referer); o != "" && req.Header.Get("Origin") == "" {
-		req.Header.Set("Origin", o)
-	}
+	applyStreamOrigin(j, req)
 	if seg.Len > 0 {
 		req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", seg.Off, seg.Off+seg.Len-1))
 	} else if seg.Off > 0 {

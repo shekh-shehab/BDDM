@@ -138,9 +138,7 @@ func (m *Manager) fetchPlaylist(ctx context.Context, j *Job, raw string) (int, [
 	if err != nil {
 		return 0, nil, err
 	}
-	if o := originOf(j.Referer); o != "" && req.Header.Get("Origin") == "" {
-		req.Header.Set("Origin", o)
-	}
+	applyStreamOrigin(j, req)
 	resp, err := m.client.Do(req)
 	if err != nil {
 		return 0, nil, err

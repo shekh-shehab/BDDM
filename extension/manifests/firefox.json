@@ -4,6 +4,7 @@
       "compat.js",
       "firefox_capture.js",
       "background.js",
+      "hls_capture.js",
       "videos.js",
       "savepdf-bg.js"
     ]

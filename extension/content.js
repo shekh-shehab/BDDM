@@ -23,14 +23,27 @@
     api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (!msg || msg.type !== "peekPlaylist" || sender.id !== api.runtime.id || !/^https?:\/\//i.test(msg.url || "")) return false;
       // Firefox: content.fetch is the page's own fetch (its Origin/Referer).
+      // Try credentials "omit" first (CORS "*" playlists fail with include),
+      // then "include" for cookie-gated playlists.
       const doFetch = (typeof content !== "undefined" && content && content.fetch) ? content.fetch.bind(content) : fetch;
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), 6000);
-      doFetch(msg.url, { credentials: "include", signal: ctrl.signal, cache: "no-store" })
-        .then(async (r) => {
-          const text = (await r.text()).slice(0, 65536);
-          sendResponse({ ok: true, status: r.status, text });
-        })
+      (async () => {
+        let last = { ok: false, status: 0, text: "" };
+        for (const creds of ["omit", "include"]) {
+          try {
+            const r = await doFetch(msg.url, { credentials: creds, signal: ctrl.signal, cache: "no-store" });
+            const text = (await r.text()).slice(0, 65536);
+            last = { ok: !!(r.ok || r.status < 400), status: r.status, text };
+            if (last.status < 400 && text.indexOf("#EXTM3U") >= 0 && !/#EXT-X-ERROR:\s*forbidden/i.test(text)) return last;
+            if (last.status < 400 && creds === "include") return last;
+          } catch (e) {
+            last = { ok: false, error: String(e && e.message || e) };
+          }
+        }
+        return last;
+      })()
+        .then((r) => sendResponse(r))
         .catch((e) => sendResponse({ ok: false, error: String(e && e.message || e) }))
         .finally(() => clearTimeout(timer));
       return true;

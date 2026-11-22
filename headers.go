@@ -254,6 +254,34 @@ func policyReferer(from, target string) string {
 	return f.Scheme + "://" + f.Host + "/"
 }
 
+// streamOrigin is the Origin the player used: first the header the
+// extension captured, then the origin of the Referer, then of the
+// player frame, then of the tab page. Needed when the iframe is
+// no-referrer so Referer is empty but the CDN still checks Origin.
+func streamOrigin(j *Job) string {
+	if j == nil {
+		return ""
+	}
+	if o := captured(j.extra, "Origin"); o != "" {
+		return o
+	}
+	for _, raw := range []string{j.Referer, j.refFrame, j.refPage} {
+		if o := originOf(raw); o != "" {
+			return o
+		}
+	}
+	return ""
+}
+
+func applyStreamOrigin(j *Job, req *http.Request) {
+	if req == nil || req.Header.Get("Origin") != "" {
+		return
+	}
+	if o := streamOrigin(j); o != "" {
+		req.Header.Set("Origin", o)
+	}
+}
+
 // applyBrowser copies the browser details of r into j (j is new or locked).
 func (j *Job) applyBrowser(r AddRequest) {
 	hdrs := map[string]string{}

@@ -974,6 +974,6 @@ api.runtime.onStartup.addListener(() => {
 });
 
 // Video detection lives in its own file (Firefox loads it from the manifest).
-if (typeof importScripts === "function" && typeof videoPageInfo === "undefined") importScripts("videos.js");
+if (typeof importScripts === "function" && typeof videoPageInfo === "undefined") importScripts("hls_capture.js", "videos.js");
 // "Save as PDF" for view-only Google Drive files and Google Docs.
 if (typeof importScripts === "function" && typeof PDF_MESSAGES === "undefined") importScripts("savepdf-bg.js");
