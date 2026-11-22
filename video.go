@@ -359,6 +359,9 @@ func (m *Manager) baseArgs(j *Job) (args []string, done func()) {
 	if ff := m.tools.Find("ffmpeg"); ff != "" {
 		args = append(args, "--ffmpeg-location", filepath.Dir(ff))
 	}
+	if addr := m.yieldProxyAddr(); addr != "" {
+		args = append(args, "--proxy", "http://"+addr)
+	}
 	if j.localPL != "" {
 		args = append(args, "--enable-file-urls")
 	}
@@ -451,7 +454,11 @@ func inputURL(j *Job) string {
 func (m *Manager) ytdlpCommand(ctx context.Context, args ...string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, m.tools.Find("yt-dlp"), args...)
 	prepareProc(cmd)
-	cmd.Env = append(os.Environ(), "PYTHONUTF8=1", "PYTHONIOENCODING=utf-8")
+	// Loopback is not proxied: test servers and local playlists stay
+	// direct, and a dropped local connection still looks like a network
+	// error to yt-dlp. Real sites go through the yield proxy.
+	cmd.Env = append(os.Environ(), "PYTHONUTF8=1", "PYTHONIOENCODING=utf-8",
+		"NO_PROXY=127.0.0.1,localhost,::1", "no_proxy=127.0.0.1,localhost,::1")
 	cmd.Cancel = func() error { killTree(cmd); return nil }
 	cmd.WaitDelay = 10 * time.Second
 	return cmd

@@ -105,6 +105,10 @@ type Settings struct {
 	HTTPDownloadLimit    int64 `json:"httpDownloadLimit"`
 	TorrentDownloadLimit int64 `json:"torrentDownloadLimit"`
 	TorrentUploadLimit   int64 `json:"torrentUploadLimit"`
+	// YieldToOther: automatically slow down when other programs (or the
+	// browser) use the network, then go back to full speed when they stop.
+	// On by default.
+	YieldToOther bool `json:"yieldToOther"`
 	// LastTorrentDir is the folder last chosen in the Add torrent window.
 	// It is pre-filled the next time. If it is missing, the usual default
 	// download folder is used instead.
@@ -117,7 +121,7 @@ func defaultSettings() Settings {
 		dir = filepath.Join(home, "Downloads", "BDDM")
 	}
 	return Settings{DownloadDir: dir, Parts: defaultParts, MaxActive: defaultMaxActive, Notifications: true, AskCaptured: true,
-		Categories: defaultCategories(), ResumeOnStart: true, CheckUpdates: true}
+		Categories: defaultCategories(), ResumeOnStart: true, CheckUpdates: true, YieldToOther: true}
 }
 
 func (s *Settings) fix() {
@@ -481,6 +485,17 @@ type Manager struct {
 	torDownShare *tokenBucket
 	torUpShare   *tokenBucket
 	torPacing    bool
+
+	// Auto-yield (yield.go): slow down when other apps use the network.
+	yieldEng       *yieldEngine
+	yieldDown      *tokenBucket
+	yieldUp        *tokenBucket
+	yieldDownCap   int64
+	yieldUpCap     int64
+	yielding       int32
+	yieldStop      chan struct{}
+	yieldProxy     string
+	yieldProxyStop func()
 }
 
 func NewManager(configDir string, notify func(title, body string)) (*Manager, error) {
@@ -502,6 +517,7 @@ func NewManager(configDir string, notify func(title, body string)) (*Manager, er
 	m.settings.fix()
 	m.settings.StartWithWindows = autostartEnabled() // the installer may have set it
 	m.initSpeedLimits()
+	m.initYield()
 
 	if data, err := os.ReadFile(m.historyPath()); err == nil {
 		var jobs []*Job
@@ -975,6 +991,7 @@ func (m *Manager) FilePath(id string) (dir, file string, err error) {
 
 // Shutdown pauses everything and saves state. Safe to call more than once.
 func (m *Manager) Shutdown() {
+	m.stopYield()
 	m.mu.Lock()
 	m.closing = true
 	var running []*Job

@@ -48,7 +48,7 @@ func newServer(m *Manager, port string, quit func(), upd *Updater) http.Handler 
 			}
 		}
 		events, seq := m.Events(after)
-		writeJSON(w, 200, map[string]any{"jobs": m.List(), "groups": m.Groups(), "events": events, "eventSeq": seq, "eventBoot": bootID})
+		writeJSON(w, 200, map[string]any{"jobs": m.List(), "groups": m.Groups(), "events": events, "eventSeq": seq, "eventBoot": bootID, "yielding": m.Yielding()})
 	})
 	// Folder downloads (one row in the list for all files of a Drive folder).
 	mux.HandleFunc("POST /api/groups/{id}/pause", func(w http.ResponseWriter, r *http.Request) {

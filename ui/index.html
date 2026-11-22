@@ -96,6 +96,8 @@
   header { display: flex; align-items: center; gap: 18px; padding: 12px 20px; background: var(--panel); border-bottom: 1px solid var(--line); }
   .logo { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 17px; letter-spacing: .5px; }
   .logo img { width: 26px; height: 26px; border-radius: 6px; display: block; }
+  #yieldHint { display: none; font-size: 12px; color: var(--muted); background: var(--panel2); border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px; white-space: nowrap; }
+  #yieldHint.show { display: inline-flex; align-items: center; }
   .about-logo { display: flex; flex-direction: column; align-items: center; margin-top: 20px; }
   .about-logo img { width: 64px; height: 64px; border-radius: 14px; }
   nav { display: flex; gap: 4px; }
@@ -216,6 +218,7 @@
     <img src="icon-32.png" alt="">
     BDDM
   </div>
+  <span id="yieldHint" title="BDDM is using less bandwidth so browsing and other apps stay quick.">Saving bandwidth</span>
   <nav>
     <button data-tab="downloads" class="active">Downloads</button>
     <button data-tab="settings">Settings</button>
@@ -289,6 +292,10 @@
       <div class="srow"><span>Torrent download</span><div class="sctrl"><input id="limTorDown" type="range" min="0" max="10" step="1" value="10"><span id="limTorDownLbl" class="slbl">Unlimited</span></div></div>
       <div class="srow"><span>Torrent upload</span><div class="sctrl"><input id="limTorUp" type="range" min="0" max="10" step="1" value="10"><span id="limTorUpLbl" class="slbl">Unlimited</span></div></div>
       <div class="field check" style="margin-top:14px">
+        <input id="setYield" type="checkbox" checked><label for="setYield" style="margin:0">Slow down downloads while I use the internet</label>
+      </div>
+      <div class="hint" style="margin:-10px 0 16px">When you browse or another app uses the network, BDDM uses less bandwidth so the rest of the PC stays quick. It goes back to full speed when the other traffic stops.</div>
+      <div class="field check">
         <input id="setNotify" type="checkbox"><label for="setNotify" style="margin:0">Show Windows notifications</label>
       </div>
       <div class="field check">
@@ -891,6 +898,7 @@ async function refresh() {
     $("offline").classList.remove("show");
     await handleEvents(r);
     renderList(r.jobs, r.groups);
+    $("yieldHint").classList.toggle("show", !!r.yielding);
   } catch (e) {
     $("offline").classList.add("show");
   } finally { busy = false; }
@@ -936,6 +944,7 @@ async function loadSettings() {
   $("limHTTP").dispatchEvent(new Event("input"));
   $("limTorDown").dispatchEvent(new Event("input"));
   $("limTorUp").dispatchEvent(new Event("input"));
+  $("setYield").checked = s.yieldToOther !== false;
   $("setNotify").checked = s.notifications;
   $("setAsk").checked = s.askCaptured;
   $("setCookies").value = s.cookiesBrowser || "";
@@ -1005,6 +1014,7 @@ $("saveSettings").onclick = async () => {
       httpDownloadLimit: speedBPS($("limHTTP").value),
       torrentDownloadLimit: speedBPS($("limTorDown").value),
       torrentUploadLimit: speedBPS($("limTorUp").value),
+      yieldToOther: $("setYield").checked,
       askCaptured: $("setAsk").checked, cookiesBrowser: $("setCookies").value,
       startWithWindows: $("setAutostart").checked, resumeOnStart: $("setResume").checked,
       checkUpdates: $("setCheckUpdates").checked,

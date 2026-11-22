@@ -255,6 +255,25 @@ type limitedReader struct {
 	b   *tokenBucket
 }
 
+func (b *tokenBucket) readChunk(n int) int {
+	if n <= 0 || b == nil || b.unlimited() {
+		return n
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.rate <= 0 {
+		return n
+	}
+	max := int(b.burst)
+	if max < 1024 {
+		max = 1024
+	}
+	if n > max {
+		return max
+	}
+	return n
+}
+
 func (r *limitedReader) Read(p []byte) (int, error) {
 	if len(p) == 0 {
 		return 0, nil
@@ -263,6 +282,7 @@ func (r *limitedReader) Read(p []byte) (int, error) {
 	if ncap > 32*1024 {
 		ncap = 32 * 1024
 	}
+	ncap = r.b.readChunk(ncap)
 	if err := r.b.Wait(r.ctx, ncap); err != nil {
 		return 0, err
 	}
@@ -349,8 +369,8 @@ func (m *Manager) applySpeedLimitsLocked() {
 		}
 	}
 	if !anyOverride {
-		setRateLimiter(m.torDownLim, s.TorrentDownloadLimit)
-		setRateLimiter(m.torUpLim, s.TorrentUploadLimit)
+		setRateLimiter(m.torDownLim, minLimit(s.TorrentDownloadLimit, m.yieldDownCap))
+		setRateLimiter(m.torUpLim, minLimit(s.TorrentUploadLimit, m.yieldUpCap))
 		m.torPacing = false
 		m.torDownShare.SetRate(s.TorrentDownloadLimit)
 		m.torUpShare.SetRate(s.TorrentUploadLimit)
@@ -364,8 +384,10 @@ func (m *Manager) applySpeedLimitsLocked() {
 	}
 	// A per-torrent override cannot be expressed with the single client
 	// limiter, so the client is left unlimited and each torrent is paced.
-	setRateLimiter(m.torDownLim, 0)
-	setRateLimiter(m.torUpLim, 0)
+	// Per-torrent overrides are paced below; the client still follows the
+	// yield cap so all torrents together leave bandwidth for other apps.
+	setRateLimiter(m.torDownLim, m.yieldDownCap)
+	setRateLimiter(m.torUpLim, m.yieldUpCap)
 	m.torPacing = true
 	m.torDownShare.SetRate(s.TorrentDownloadLimit)
 	m.torUpShare.SetRate(s.TorrentUploadLimit)
@@ -386,12 +408,15 @@ func (m *Manager) httpBucketFor(j *Job) *tokenBucket {
 }
 
 func (m *Manager) limitHTTPReader(ctx context.Context, j *Job, r io.Reader) io.Reader {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	// Always wrap the shared yield bucket so a cap that appears later is
+	// picked up by parts that are already running.
+	r = m.wrapYield(ctx, r)
 	b := m.httpBucketFor(j)
 	if b.unlimited() {
 		return r
-	}
-	if ctx == nil {
-		ctx = context.Background()
 	}
 	return &limitedReader{ctx: ctx, r: r, b: b}
 }
@@ -475,12 +500,20 @@ func (m *Manager) paceTorrent(j *Job, done, uploaded int64) {
 	if uDelta < 0 {
 		uDelta = 0
 	}
-	if dlBPS == 0 || dlB.takeDelta(dDelta) {
+	allowDown := dlBPS == 0 || dlB.takeDelta(dDelta)
+	if m.yieldDown != nil && !m.yieldDown.unlimited() && !m.yieldDown.takeDelta(dDelta) {
+		allowDown = false
+	}
+	if allowDown {
 		th.AllowDataDownload()
 	} else {
 		th.DisallowDataDownload()
 	}
-	if ulBPS == 0 || ulB.takeDelta(uDelta) {
+	allowUp := ulBPS == 0 || ulB.takeDelta(uDelta)
+	if m.yieldUp != nil && !m.yieldUp.unlimited() && !m.yieldUp.takeDelta(uDelta) {
+		allowUp = false
+	}
+	if allowUp {
 		th.AllowDataUpload()
 	} else {
 		th.DisallowDataUpload()
