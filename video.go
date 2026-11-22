@@ -1,13 +1,15 @@
 package main
 
 // video.go: video downloads with yt-dlp (YouTube, Facebook, Instagram,
-// TikTok, HLS .m3u8, DASH .mpd and the ~1800 other sites yt-dlp supports).
+// TikTok, DASH .mpd and the ~1800 other sites yt-dlp supports). Direct HLS
+// (.m3u8) streams are downloaded by BDDM itself (hls.go / hlsdl.go) and
+// joined with ffmpeg; yt-dlp is the fallback.
 //
 // Flow: a video link becomes a Pending job, BDDM reads the video's details
-// with "yt-dlp -J" and shows the video options window (ui/video.html). When
-// the user presses Start, the job runs yt-dlp with the chosen quality; its
-// progress lines are shown in the Downloads list. Pause stops yt-dlp, and
-// Resume runs it again (it continues its .part files).
+// with "yt-dlp -J" (and the playlist itself for HLS qualities) and shows
+// the video options window (ui/video.html). When the user presses Start,
+// HLS jobs run the native downloader (speed limits and auto-yield apply);
+// other sites run yt-dlp. Pause stops the work, and Resume continues.
 
 import (
 	"bufio"
@@ -1125,6 +1127,18 @@ func (m *Manager) runVideoOnce(ctx context.Context, j *Job) (rerr error) {
 				m.dropFastFiles(j)
 			}
 		}()
+	}
+	if useNativeHLS(m, j) {
+		err := m.runNativeHLS(ctx, j)
+		if err == nil || ctx.Err() != nil || isNetErr(err) {
+			return err
+		}
+		if errors.Is(err, errSampleAES) || isRefused(err.Error()) {
+			return err
+		}
+		log.Printf("[%s] native HLS failed: %v; trying yt-dlp", j.Name, err)
+		j.setMessage("Using yt-dlp: %s", shortReason(err))
+		dropHLSWork(hlsOutputPath(j))
 	}
 	if fix {
 		// Clean a fresh copy of the site's playlist (the temp copy may be

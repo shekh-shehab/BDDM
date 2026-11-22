@@ -46,6 +46,7 @@ type hlsQuality struct {
 	Height    int
 	Bandwidth int64
 	URL       string
+	Audio     string // EXT-X-STREAM-INF AUDIO="group"
 }
 
 var (
@@ -68,6 +69,9 @@ func parseMaster(text string) []hlsQuality {
 			}
 			if m := bandwidthRe.FindStringSubmatch(l); m != nil {
 				q.Bandwidth, _ = strconv.ParseInt(m[1], 10, 64)
+			}
+			if a := parseHLSAttrs(strings.TrimPrefix(l, "#EXT-X-STREAM-INF:")); a["AUDIO"] != "" {
+				q.Audio = a["AUDIO"]
 			}
 			cur = &q
 		case l == "" || strings.HasPrefix(l, "#"):

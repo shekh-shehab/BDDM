@@ -8,9 +8,46 @@
 <link rel="icon" type="image/png" sizes="128x128" href="icon.png">
 <style>
   :root {
+    color-scheme: light;
+    --bg: #e6e9ee; --panel: #ffffff; --panel2: #eef0f3; --line: rgba(20,30,50,.10);
+    --text: #1a1d21; --muted: #5b6370; --accent: #2f6fed; --accent2: #1f55c4;
+    --ok: #1f9d62; --warn: #b45a12; --bad: #c0392b;
+    --hover-bg: #e4e7ed; --hover-line: rgba(20,30,50,.28);
+    --sel-bg: #e6eefd;
+    --warn-bg: #fdeede; --warn-fg: #b45a12; --warn-line: #f5d3a8;
+    --bad-bg: #fdecea; --bad-fg: #9b2c20; --bad-line: #f5c2c0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --bg: #14161b; --panel: #1c1f26; --panel2: #232733; --line: #2e3340;
+      --text: #e6e8ee; --muted: #8b93a7; --accent: #3b82f6; --accent2: #2563eb;
+      --ok: #22c55e; --warn: #f59e0b; --bad: #ef4444;
+      --hover-bg: #2a2f3d; --hover-line: #49506a;
+      --sel-bg: #172554;
+      --warn-bg: #2b1a05; --warn-fg: #fcd34d; --warn-line: #78350f;
+      --bad-bg: #2a0f12; --bad-fg: #fca5a5; --bad-line: #7f1d1d;
+    }
+  }
+  html[data-scheme="light"] {
+    color-scheme: light;
+    --bg: #e6e9ee; --panel: #ffffff; --panel2: #eef0f3; --line: rgba(20,30,50,.10);
+    --text: #1a1d21; --muted: #5b6370; --accent: #2f6fed; --accent2: #1f55c4;
+    --ok: #1f9d62; --warn: #b45a12; --bad: #c0392b;
+    --hover-bg: #e4e7ed; --hover-line: rgba(20,30,50,.28);
+    --sel-bg: #e6eefd;
+    --warn-bg: #fdeede; --warn-fg: #b45a12; --warn-line: #f5d3a8;
+    --bad-bg: #fdecea; --bad-fg: #9b2c20; --bad-line: #f5c2c0;
+  }
+  html[data-scheme="dark"] {
+    color-scheme: dark;
     --bg: #14161b; --panel: #1c1f26; --panel2: #232733; --line: #2e3340;
     --text: #e6e8ee; --muted: #8b93a7; --accent: #3b82f6; --accent2: #2563eb;
     --ok: #22c55e; --warn: #f59e0b; --bad: #ef4444;
+    --hover-bg: #2a2f3d; --hover-line: #49506a;
+    --sel-bg: #172554;
+    --warn-bg: #2b1a05; --warn-fg: #fcd34d; --warn-line: #78350f;
+    --bad-bg: #2a0f12; --bad-fg: #fca5a5; --bad-line: #7f1d1d;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; }
@@ -28,8 +65,8 @@
   .label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; margin-bottom: 6px; }
   .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
   .opt { display: flex; align-items: center; gap: 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; cursor: pointer; min-width: 0; }
-  .opt:hover { border-color: #49506a; }
-  .opt.sel { border-color: var(--accent); background: #172554; }
+  .opt:hover { border-color: var(--hover-line); }
+  .opt.sel { border-color: var(--accent); background: var(--sel-bg); }
   .opt input { margin: 0; accent-color: var(--accent); }
   .opt .q { font-weight: 600; white-space: nowrap; }
   .opt .s { color: var(--muted); font-size: 12px; margin-left: auto; white-space: nowrap; }
@@ -41,19 +78,19 @@
   input[type=text] { flex: 1; width: 100%; }
   input:focus, select:focus { border-color: var(--accent); }
   button { font: inherit; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; cursor: pointer; white-space: nowrap; }
-  button:hover { border-color: #49506a; background: #2a2f3d; }
+  button:hover { border-color: var(--hover-line); background: var(--hover-bg); }
   button:disabled { opacity: .45; cursor: default; }
   button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
   button.primary:hover { background: var(--accent2); }
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin-bottom: 13px; }
-  .warn { background: #2b1a05; border-color: #78350f; color: #fcd34d; font-size: 13px; }
-  .bad { background: #2a0f12; border-color: #7f1d1d; color: #fca5a5; font-size: 13px; word-break: break-word; }
+  .warn { background: var(--warn-bg); border-color: var(--warn-line); color: var(--warn-fg); font-size: 13px; }
+  .bad { background: var(--bad-bg); border-color: var(--bad-line); color: var(--bad-fg); font-size: 13px; word-break: break-word; }
   .bar { height: 6px; background: var(--panel2); border-radius: 99px; overflow: hidden; margin: 6px 0 2px; }
   .bar > div { height: 100%; width: 0; background: var(--accent); border-radius: 99px; transition: width .4s; }
   .tool { font-size: 12px; color: var(--muted); margin-top: 8px; }
   .spin { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: r .8s linear infinite; vertical-align: -2px; margin-right: 8px; }
   @keyframes r { to { transform: rotate(360deg); } }
-  .err { color: #fca5a5; font-size: 13px; min-height: 18px; }
+  .err { color: var(--bad-fg); font-size: 13px; min-height: 18px; }
   footer { display: flex; gap: 8px; align-items: center; padding: 12px 18px; background: var(--panel); border-top: 1px solid var(--line); }
   footer .spacer { flex: 1; }
   [hidden] { display: none !important; }
@@ -176,9 +213,9 @@ function build(v) {
   const q = $("qualities");
   q.innerHTML = "";
   const heights = (info.qualities || []);
-  const def = heights.find((h) => h.height <= 1080) || heights[0];
-  q.append(opt("q", "best", "Best available", heights[0] ? heights[0].label : "", !def, false));
-  for (const h of heights) q.append(opt("q", String(h.height), h.label, fmtBytes(h.size), def && h.height === def.height, false));
+  // Default is the highest quality ("Best available").
+  q.append(opt("q", "best", "Best available", heights[0] ? heights[0].label : "", true, false));
+  for (const h of heights) q.append(opt("q", String(h.height), h.label, fmtBytes(h.size), false, false));
   q.append(opt("q", "mp3", "Audio only (MP3)", fmtBytes(info.audioSize), false, false));
   q.append(opt("q", "m4a", "Audio only (M4A)", fmtBytes(info.audioSize), false, false));
   // keep the grid tidy: the audio options get a full row each when the count does not fit
@@ -309,6 +346,8 @@ window.addEventListener("pagehide", () => {
     method: "POST", keepalive: true, headers: { "Content-Type": "application/json" }, body: "{}",
   }).catch(() => {});
 });
+const scheme = new URLSearchParams(location.search).get("scheme");
+if (scheme === "dark" || scheme === "light") document.documentElement.dataset.scheme = scheme;
 load();
 </script>
 </body>

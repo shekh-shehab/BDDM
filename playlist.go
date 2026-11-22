@@ -10,7 +10,8 @@ package main
 //
 // When what comes back is not a playlist at all (an encrypted blob, a web
 // page or an error), BDDM explains that in plain words instead.
-// BDDM does not try to decrypt protected streams.
+// AES-128 segment encryption is handled by the native HLS downloader
+// (hls.go); SAMPLE-AES / DRM playlists are not decrypted.
 
 import (
 	"bytes"
