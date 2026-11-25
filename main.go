@@ -42,12 +42,16 @@ func main() {
 	windowTheme := flag.String("window-theme", themeSystem, "internal: system, light or dark")
 	devtools := flag.Bool("devtools", false, "debug: enable WebView2 DevTools (or set BDDM_DEVTOOLS=1)")
 	wv2test := flag.Bool("wv2test", false, "debug: show red WebView2 test page (or set BDDM_WV2_TEST=1)")
+	updateTest := flag.String("updatetest", "", "debug: test the updater with this release tag (or set BDDM_UPDATE_TEST_TAG)")
 	flag.Parse()
 	if *devtools {
 		setWebViewDevTools(true)
 	}
 	if *wv2test {
 		setWebViewTestMode(true)
+	}
+	if *updateTest != "" {
+		setUpdateTestTag(*updateTest)
 	}
 	if *windowURL != "" { // helper process for one BDDM window (bug 76)
 		setupWindowHostLog()
@@ -72,6 +76,9 @@ func main() {
 	}
 	_ = os.MkdirAll(configDir, 0755)
 	setupLog(configDir)
+	if tag := updateTestTag(); tag != "" {
+		log.Printf("update test mode: using GitHub tag %s instead of /releases/latest", tag)
+	}
 	setCurrentProcessAppUserModelID()
 	if err := registerAppIdentity(); err != nil {
 		log.Printf("Windows app identity: %v", err)
@@ -109,9 +116,11 @@ func main() {
 		notify)
 	upd.dir = configDir
 	upd.running = m.RunningCount
-	// Stop transfers and save before the installer starts, so torrents
-	// that were running can resume and Windows does not have to force-kill BDDM.
+	// Stop transfers, close every BDDM window and -window helper, then
+	// start the silent setup. The process exits after setup is launched
+	// so the installer can copy BDDM.exe. /run reopens the new version.
 	upd.prepare = m.Shutdown
+	upd.closeWindows = closeBDDMWindowHosts
 	upd.runSetup = runSilentSetup
 	upd.Start()
 
@@ -121,6 +130,7 @@ func main() {
 	quit := func() {
 		once.Do(func() {
 			log.Print("Stopping: pausing downloads and saving...")
+			closeBDDMWindowHosts()
 			stopTaskbar()
 			stopTray()
 			upd.Stop()

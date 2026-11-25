@@ -106,4 +106,10 @@ func TestInstallerRestartsBDDMAfterUpdate(t *testing.T) {
 	if strings.Contains(nsi, `nsExec::Exec '"$INSTDIR\BDDM.exe"'`) {
 		t.Error("post-update start must not use nsExec (it would wait for BDDM to quit)")
 	}
+	if !strings.Contains(nsi, `ExecBDDMHelper "$INSTDIR\BDDM.exe" "-register"`) {
+		t.Error("post-update -register must use ExecBDDMHelper (CreateProcess + timeout)")
+	}
+	if !strings.Contains(nsi, "RequestExecutionLevel user") {
+		t.Error("installer must stay user-level so /run relaunches BDDM unelevated")
+	}
 }

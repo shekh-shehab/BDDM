@@ -103,7 +103,9 @@ func runSilentSetup(path string) error {
 	if !filepath.IsAbs(path) || !strings.EqualFold(filepath.Ext(path), ".exe") {
 		return fmt.Errorf("the update file is not a setup program")
 	}
-	cmd := exec.Command(path, "/S", "/run")
+	// Start, do not Wait: the running app must exit so the installer can
+	// overwrite BDDM.exe. /S is silent; /run relaunches BDDM after install.
+	cmd := exec.Command(path, silentSetupArgs()...)
 	hideConsole(cmd)
 	var err error
 	withForeground(func() { err = cmd.Start() })

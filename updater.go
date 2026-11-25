@@ -22,14 +22,15 @@ import (
 )
 
 const (
-	updateAPIURL    = "https://api.github.com/repos/shekh-shehab/BDDM/releases/latest"
-	updatePeriod    = 6 * time.Hour
-	updateTimeout   = 15 * time.Second
-	updateMaxBody   = 1 << 20
-	updateDlTimeout = 15 * time.Minute
-	updateSumMax    = 64 << 10
-	setupAssetName  = "bddm-setup.exe"
-	sumAssetName    = "bddm-setup.exe.sha256"
+	updateAPIURL       = "https://api.github.com/repos/shekh-shehab/BDDM/releases/latest"
+	updateAPITagPrefix = "https://api.github.com/repos/shekh-shehab/BDDM/releases/tags/"
+	updatePeriod       = 6 * time.Hour
+	updateTimeout      = 15 * time.Second
+	updateMaxBody      = 1 << 20
+	updateDlTimeout    = 15 * time.Minute
+	updateSumMax       = 64 << 10
+	setupAssetName     = "bddm-setup.exe"
+	sumAssetName       = "bddm-setup.exe.sha256"
 )
 
 // githubRelease is the fields we need from the GitHub releases API.
@@ -82,32 +83,33 @@ type UpdateStatus struct {
 
 // Updater checks GitHub for a newer BDDM and, after a click, installs it.
 type Updater struct {
-	mu        sync.Mutex
-	current   string
-	latest    *ReleaseInfo
-	dismissed string // hide the notice for this version until the next start
-	notified  string // tray notice already shown for this version
-	checking  bool
-	message   string
-	state     string
-	done      int64
-	total     int64
-	errMsg    string
-	cancelDl  context.CancelFunc
-	client    *http.Client
-	dlClient  *http.Client
-	apiURL    string
-	period    time.Duration
-	dir       string
-	notifyFn  func(title, body string)
-	enabled   func() bool
-	allowNote func() bool
-	running   func() int
-	prepare   func()
-	runSetup  func(path string) error
-	quitFn    func()
-	stop      chan struct{}
-	stopped   chan struct{}
+	mu           sync.Mutex
+	current      string
+	latest       *ReleaseInfo
+	dismissed    string // hide the notice for this version until the next start
+	notified     string // tray notice already shown for this version
+	checking     bool
+	message      string
+	state        string
+	done         int64
+	total        int64
+	errMsg       string
+	cancelDl     context.CancelFunc
+	client       *http.Client
+	dlClient     *http.Client
+	apiURL       string
+	period       time.Duration
+	dir          string
+	notifyFn     func(title, body string)
+	enabled      func() bool
+	allowNote    func() bool
+	running      func() int
+	prepare      func()
+	closeWindows func()
+	runSetup     func(path string) error
+	quitFn       func()
+	stop         chan struct{}
+	stopped      chan struct{}
 }
 
 func newUpdater(current string, enabled, allowNote func() bool, notifyFn func(title, body string)) *Updater {
@@ -120,7 +122,7 @@ func newUpdater(current string, enabled, allowNote func() bool, notifyFn func(ti
 	return &Updater{
 		current:   current,
 		client:    &http.Client{Timeout: updateTimeout},
-		apiURL:    updateAPIURL,
+		apiURL:    updaterAPIURL(),
 		period:    updatePeriod,
 		notifyFn:  notifyFn,
 		enabled:   enabled,
@@ -190,7 +192,7 @@ func (u *Updater) statusLocked() UpdateStatus {
 	if u.latest != nil {
 		s.Version = u.latest.Version
 		s.URL = u.latest.URL
-		newer := compareVersions(u.current, u.latest.Version) < 0
+		newer := updateIsNewer(u.current, u.latest)
 		s.CanInstall = newer && u.latest.Setup != nil
 		if newer && (u.dismissed != u.latest.Version || u.state != "") {
 			s.Available = true
@@ -233,7 +235,7 @@ func (u *Updater) Check(manual bool) UpdateStatus {
 		return u.statusLocked()
 	}
 	u.latest = info
-	if compareVersions(current, info.Version) < 0 {
+	if updateIsNewer(current, info) {
 		if manual {
 			u.message = "BDDM v" + info.Version + " is available."
 		} else {
@@ -288,7 +290,7 @@ func (u *Updater) Install() UpdateStatus {
 		u.mu.Unlock()
 		return s
 	}
-	if u.latest == nil || u.latest.Setup == nil || compareVersions(u.current, u.latest.Version) >= 0 {
+	if u.latest == nil || u.latest.Setup == nil || !updateIsNewer(u.current, u.latest) {
 		u.state = "error"
 		u.errMsg = "No installer is available for this release."
 		s := u.statusLocked()
@@ -416,16 +418,21 @@ func (u *Updater) doInstall(ctx context.Context, client *http.Client, dir, curre
 	u.state = "installing"
 	u.done = u.total
 	u.cancelDl = nil
-	prepare, runSetup, quitFn := u.prepare, u.runSetup, u.quitFn
+	prepare, closeWindows, runSetup, quitFn := u.prepare, u.closeWindows, u.runSetup, u.quitFn
 	u.mu.Unlock()
 
-	// prepare (Manager.Shutdown) stops the server-side work and saves
-	// state, including which torrents should start again. The installer
-	// is started only after that, then this process exits. The installer
-	// waits for this process to leave on its own and only force-kills it
-	// as a last resort.
+	// prepare (Manager.Shutdown) stops transfers and saves state.
+	// closeWindows then closes every BDDM window, the tray popup, and
+	// -window helper processes so $INSTDIR\BDDM.exe is not in use.
+	// The silent setup is started with /S /run but not waited on, then
+	// this process exits. The installer waits for us to leave and only
+	// force-kills leftover BDDM.exe as a last resort, then /run starts
+	// the new version as the same (unelevated) user.
 	if prepare != nil {
 		prepare()
+	}
+	if closeWindows != nil {
+		closeWindows()
 	}
 	if runSetup != nil {
 		if err := runSetup(dest); err != nil {
@@ -468,16 +475,23 @@ func fetchLatestRelease(client *http.Client, apiURL, current string) (*ReleaseIn
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("GitHub returned HTTP %d", resp.StatusCode)
 	}
-	return parseLatestRelease(body)
+	return parseRelease(body, releaseAPIAllowsPrerelease(apiURL))
 }
 
 // parseLatestRelease reads a GitHub /releases/latest JSON body.
+// Pre-releases and drafts are always rejected on this path.
 func parseLatestRelease(data []byte) (*ReleaseInfo, error) {
+	return parseRelease(data, false)
+}
+
+// parseRelease reads a GitHub release JSON body. Drafts are always
+// rejected. Pre-releases are allowed only when testing a specific tag.
+func parseRelease(data []byte, allowPrerelease bool) (*ReleaseInfo, error) {
 	var r githubRelease
 	if err := json.Unmarshal(data, &r); err != nil {
 		return nil, err
 	}
-	if r.Draft || r.Prerelease {
+	if r.Draft || (r.Prerelease && !allowPrerelease) {
 		return nil, fmt.Errorf("latest release is a draft or pre-release")
 	}
 	tag := strings.TrimSpace(r.TagName)
@@ -670,6 +684,83 @@ func normalizeVersion(s string) string {
 		s = s[1:]
 	}
 	return strings.TrimSpace(s)
+}
+
+// updateTestTagOverride is set by -updatetest. The BDDM_UPDATE_TEST_TAG
+// environment variable is the other hidden way to test a pre-release.
+var updateTestTagOverride string
+
+func setUpdateTestTag(tag string) {
+	updateTestTagOverride = strings.TrimSpace(tag)
+}
+
+func updateTestTag() string {
+	tag := strings.TrimSpace(updateTestTagOverride)
+	if tag == "" {
+		tag = strings.TrimSpace(os.Getenv("BDDM_UPDATE_TEST_TAG"))
+	}
+	if !validUpdateTestTag(tag) {
+		return ""
+	}
+	return tag
+}
+
+func validUpdateTestTag(tag string) bool {
+	if tag == "" || len(tag) > 64 {
+		return false
+	}
+	c0 := tag[0]
+	if c0 != 'v' && (c0 < '0' || c0 > '9') {
+		return false
+	}
+	for i := 0; i < len(tag); i++ {
+		c := tag[i]
+		if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-' || c == '+' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+// updaterAPIURL is /releases/latest unless a hidden test tag is set.
+func updaterAPIURL() string {
+	if tag := updateTestTag(); tag != "" {
+		return updateAPITagPrefix + url.PathEscape(tag)
+	}
+	return updateAPIURL
+}
+
+func releaseAPIAllowsPrerelease(apiURL string) bool {
+	return strings.Contains(apiURL, "/releases/tags/")
+}
+
+// updateIsNewer reports whether info should be offered as an update.
+// Production uses version compare. In test mode, any other tag is offered
+// so a pre-release of the same version (v1.5.4-test5 vs 1.5.4) can be installed.
+func updateIsNewer(current string, info *ReleaseInfo) bool {
+	if info == nil {
+		return false
+	}
+	if updateTestTag() != "" {
+		cur := "v" + strings.TrimPrefix(strings.TrimSpace(current), "v")
+		tag := strings.TrimSpace(info.Tag)
+		if tag == "" {
+			tag = "v" + strings.TrimPrefix(info.Version, "v")
+		} else if !strings.HasPrefix(strings.ToLower(tag), "v") {
+			tag = "v" + tag
+		}
+		return !strings.EqualFold(cur, tag)
+	}
+	return compareVersions(current, info.Version) < 0
+}
+
+// silentSetupArgs is how the in-app updater starts BDDM-Setup.exe.
+// /S is NSIS silent mode. /run tells the installer to reopen BDDM after
+// a successful upgrade, as the same unelevated user. The updater starts
+// setup and does not wait, so this process can exit and unlock BDDM.exe.
+func silentSetupArgs() []string {
+	return []string{"/S", "/run"}
 }
 
 // compareVersions compares two dotted version numbers (a leading "v" is

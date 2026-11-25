@@ -674,6 +674,71 @@ func findHostWindow(pid int) uintptr {
 	return 0
 }
 
+var (
+	windowHostMu    sync.Mutex
+	windowHostProcs = map[int]*os.Process{}
+)
+
+func rememberWindowHost(p *os.Process) {
+	if p == nil {
+		return
+	}
+	windowHostMu.Lock()
+	windowHostProcs[p.Pid] = p
+	windowHostMu.Unlock()
+}
+
+func forgetWindowHost(pid int) {
+	windowHostMu.Lock()
+	delete(windowHostProcs, pid)
+	windowHostMu.Unlock()
+}
+
+func snapshotWindowHosts() []*os.Process {
+	windowHostMu.Lock()
+	defer windowHostMu.Unlock()
+	out := make([]*os.Process, 0, len(windowHostProcs))
+	for _, p := range windowHostProcs {
+		out = append(out, p)
+	}
+	return out
+}
+
+const windowHostCloseWait = 3 * time.Second
+
+// closeBDDMWindowHosts closes every BDDM window (main, Settings, tray popup)
+// and any leftover Edge --app windows, waits briefly for the -window helper
+// processes to exit, then force-kills helpers that are still running.
+// The engine process itself is not killed.
+func closeBDDMWindowHosts() {
+	closeOldEdgeBDDMWindows()
+	self := os.Getpid()
+	for _, w := range listBDDMAppWindows() {
+		procPostMessageW.Call(w.hwnd, wmClose, 0, 0)
+	}
+	deadline := time.Now().Add(windowHostCloseWait)
+	for time.Now().Before(deadline) {
+		left := false
+		for _, w := range listBDDMAppWindows() {
+			if int(w.pid) != self {
+				left = true
+				break
+			}
+		}
+		if !left {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	for _, p := range snapshotWindowHosts() {
+		if p == nil || p.Pid == self {
+			continue
+		}
+		_ = p.Kill()
+		forgetWindowHost(p.Pid)
+	}
+}
+
 // launchWindowHost starts "BDDM.exe -window ...". If the helper exits with
 // an error before its window appears, WebView2 is marked broken for this
 // run and fallback opens the Edge window instead.
@@ -704,10 +769,12 @@ func launchWindowHost(u, kind string, r windowRect, fallback func() error) error
 		return fallback()
 	}
 	pid := cmd.Process.Pid
+	rememberWindowHost(cmd.Process)
 	allowSetForegroundWindow(uint32(pid))
 	done := make(chan error, 1)
 	go func() {
 		waitErr := cmd.Wait()
+		forgetWindowHost(pid)
 		if kind == windowKindTray {
 			noteTrayPopupExited()
 		}

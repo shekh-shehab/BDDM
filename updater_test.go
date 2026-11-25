@@ -605,12 +605,13 @@ func TestInstallShutsDownBeforeSetup(t *testing.T) {
 	u := newUpdater("1.4.12", nil, nil, nil)
 	u.client, u.dlClient, u.apiURL, u.dir = srv.Client(), srv.Client(), srv.URL+"/releases/latest", t.TempDir()
 	u.prepare = func() { step("prepare") }
+	u.closeWindows = func() { step("windows") }
 	u.runSetup = func(path string) error {
 		mu.Lock()
 		n := len(order)
 		mu.Unlock()
-		if n == 0 || order[n-1] != "prepare" {
-			t.Errorf("installer started before shutdown/prepare; order=%v", append([]string(nil), order...))
+		if n < 2 || order[n-1] != "windows" || order[0] != "prepare" {
+			t.Errorf("installer started before prepare/windows closed; order=%v", append([]string(nil), order...))
 		}
 		step("setup")
 		return nil
@@ -624,7 +625,7 @@ func TestInstallShutsDownBeforeSetup(t *testing.T) {
 		mu.Lock()
 		n := len(order)
 		mu.Unlock()
-		if n >= 3 {
+		if n >= 4 {
 			break
 		}
 		if u.Status().State == "error" {
@@ -635,7 +636,182 @@ func TestInstallShutsDownBeforeSetup(t *testing.T) {
 	mu.Lock()
 	got := append([]string(nil), order...)
 	mu.Unlock()
-	if strings.Join(got, ",") != "prepare,setup,quit" {
-		t.Fatalf("update steps: got %v, want prepare then setup then quit", got)
+	if strings.Join(got, ",") != "prepare,windows,setup,quit" {
+		t.Fatalf("update steps: got %v, want prepare, windows, setup, then quit", got)
 	}
+}
+
+func TestSilentSetupArgs(t *testing.T) {
+	got := silentSetupArgs()
+	if len(got) != 2 || got[0] != "/S" || got[1] != "/run" {
+		t.Fatalf("silentSetupArgs() = %v, want /S /run", got)
+	}
+}
+
+func TestValidUpdateTestTag(t *testing.T) {
+	ok := []string{"v1.5.4-test5", "1.5.4", "v2.0.0+meta", "v1"}
+	for _, tag := range ok {
+		if !validUpdateTestTag(tag) {
+			t.Errorf("validUpdateTestTag(%q) = false, want true", tag)
+		}
+	}
+	bad := []string{"", "latest", "../v1", "v1/foo", "v1?x=1", "v1 tag", "http://evil", "/releases/latest"}
+	for _, tag := range bad {
+		if validUpdateTestTag(tag) {
+			t.Errorf("validUpdateTestTag(%q) = true, want false", tag)
+		}
+	}
+}
+
+func TestUpdaterAPIURLUsesLatestByDefault(t *testing.T) {
+	t.Cleanup(func() { updateTestTagOverride = "" })
+	updateTestTagOverride = ""
+	t.Setenv("BDDM_UPDATE_TEST_TAG", "")
+	if got := updaterAPIURL(); got != updateAPIURL {
+		t.Fatalf("default updater API: %s", got)
+	}
+	if releaseAPIAllowsPrerelease(updateAPIURL) {
+		t.Fatal("/releases/latest must not allow pre-releases")
+	}
+}
+
+func TestUpdaterAPIURLTestTag(t *testing.T) {
+	t.Cleanup(func() { updateTestTagOverride = "" })
+	updateTestTagOverride = ""
+	t.Setenv("BDDM_UPDATE_TEST_TAG", "v1.5.4-test5")
+	want := updateAPITagPrefix + "v1.5.4-test5"
+	if got := updaterAPIURL(); got != want {
+		t.Fatalf("env tag URL: got %s, want %s", got, want)
+	}
+	if !releaseAPIAllowsPrerelease(want) {
+		t.Fatal("tag URL should allow pre-releases")
+	}
+	t.Setenv("BDDM_UPDATE_TEST_TAG", "")
+	setUpdateTestTag("v1.5.4-test5")
+	if got := updaterAPIURL(); got != want {
+		t.Fatalf("flag tag URL: got %s, want %s", got, want)
+	}
+	setUpdateTestTag("../evil")
+	t.Setenv("BDDM_UPDATE_TEST_TAG", "")
+	if got := updaterAPIURL(); got != updateAPIURL {
+		t.Fatalf("invalid override should fall back to latest, got %s", got)
+	}
+}
+
+func TestParseReleaseAllowsPrereleaseOnlyWhenAsked(t *testing.T) {
+	body := []byte(`{"tag_name":"v1.5.4-test5","html_url":"https://github.com/shekh-shehab/BDDM/releases/tag/v1.5.4-test5","draft":false,"prerelease":true,"assets":[{"name":"BDDM-Setup.exe","size":10,"browser_download_url":"https://example.com/BDDM-Setup.exe"}]}`)
+	if _, err := parseLatestRelease(body); err == nil {
+		t.Fatal("parseLatestRelease must reject pre-releases")
+	}
+	if _, err := parseRelease(body, false); err == nil {
+		t.Fatal("parseRelease must reject pre-releases when not allowed")
+	}
+	info, err := parseRelease(body, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Version != "1.5.4-test5" || info.Tag != "v1.5.4-test5" || info.Setup == nil {
+		t.Fatalf("parsed pre-release: %+v", info)
+	}
+	draft := []byte(`{"tag_name":"v1.5.4-test5","html_url":"https://example.com","draft":true,"prerelease":true}`)
+	if _, err := parseRelease(draft, true); err == nil {
+		t.Fatal("drafts must still be rejected in test mode")
+	}
+}
+
+func TestUpdateIsNewerTestTag(t *testing.T) {
+	t.Cleanup(func() { updateTestTagOverride = "" })
+	updateTestTagOverride = ""
+	t.Setenv("BDDM_UPDATE_TEST_TAG", "")
+	info := &ReleaseInfo{Version: "1.5.4-test5", Tag: "v1.5.4-test5", Setup: &ReleaseAsset{Name: "BDDM-Setup.exe"}}
+	if updateIsNewer("1.5.4", info) {
+		t.Fatal("without test mode, 1.5.4-test5 must not be newer than 1.5.4")
+	}
+	t.Setenv("BDDM_UPDATE_TEST_TAG", "v1.5.4-test5")
+	if !updateIsNewer("1.5.4", info) {
+		t.Fatal("test mode should offer v1.5.4-test5 over current 1.5.4")
+	}
+	same := &ReleaseInfo{Version: "1.5.4", Tag: "v1.5.4", Setup: &ReleaseAsset{Name: "BDDM-Setup.exe"}}
+	t.Setenv("BDDM_UPDATE_TEST_TAG", "v1.5.4")
+	if updateIsNewer("1.5.4", same) {
+		t.Fatal("test mode should not offer the same tag as the current version")
+	}
+}
+
+func TestFetchReleaseTagAllowsPrerelease(t *testing.T) {
+	pre := []byte(`{"tag_name":"v1.5.4-test5","html_url":"https://github.com/shekh-shehab/BDDM/releases/tag/v1.5.4-test5","draft":false,"prerelease":true,"assets":[{"name":"BDDM-Setup.exe","size":3,"browser_download_url":"https://example.com/BDDM-Setup.exe"}]}`)
+	mux := http.NewServeMux()
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	mux.HandleFunc("/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+		w.Write(pre)
+	})
+	mux.HandleFunc("/releases/tags/v1.5.4-test5", func(w http.ResponseWriter, r *http.Request) {
+		w.Write(pre)
+	})
+
+	if _, err := fetchLatestRelease(srv.Client(), srv.URL+"/releases/latest", "1.5.4"); err == nil {
+		t.Fatal("/releases/latest must reject a pre-release body")
+	}
+	info, err := fetchLatestRelease(srv.Client(), srv.URL+"/releases/tags/v1.5.4-test5", "1.5.4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Tag != "v1.5.4-test5" || info.Setup == nil {
+		t.Fatalf("tag fetch: %+v", info)
+	}
+}
+
+func TestCheckAndInstallTestTag(t *testing.T) {
+	t.Cleanup(func() { updateTestTagOverride = "" })
+	setUpdateTestTag("v1.5.4-test5")
+
+	payload := []byte("setup-test-tag")
+	mux := http.NewServeMux()
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	body, _ := json.Marshal(map[string]any{
+		"tag_name":   "v1.5.4-test5",
+		"html_url":   "https://github.com/shekh-shehab/BDDM/releases/tag/v1.5.4-test5",
+		"draft":      false,
+		"prerelease": true,
+		"assets": []map[string]any{{
+			"name": "BDDM-Setup.exe", "size": len(payload), "browser_download_url": srv.URL + "/files/BDDM-Setup.exe",
+		}},
+	})
+	mux.HandleFunc("/releases/tags/v1.5.4-test5", func(w http.ResponseWriter, r *http.Request) {
+		w.Write(body)
+	})
+	mux.HandleFunc("/files/BDDM-Setup.exe", func(w http.ResponseWriter, r *http.Request) {
+		w.Write(payload)
+	})
+
+	var ranSetup, quit atomic.Bool
+	u := newUpdater("1.5.4", nil, nil, nil)
+	if !strings.HasSuffix(u.apiURL, "/releases/tags/v1.5.4-test5") {
+		t.Fatalf("newUpdater apiURL = %s, want tag URL", u.apiURL)
+	}
+	u.client, u.dlClient, u.apiURL, u.dir = srv.Client(), srv.Client(), srv.URL+"/releases/tags/v1.5.4-test5", t.TempDir()
+	u.runSetup = func(path string) error {
+		ranSetup.Store(true)
+		return nil
+	}
+	u.quitFn = func() { quit.Store(true) }
+
+	st := u.Check(true)
+	if !st.Available || !st.CanInstall || st.Version != "1.5.4-test5" {
+		t.Fatalf("check status: %+v", st)
+	}
+	u.Install()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if ranSetup.Load() && quit.Load() {
+			return
+		}
+		if u.Status().State == "error" {
+			t.Fatalf("install error: %s", u.Status().Error)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("install did not finish; setup=%v quit=%v status=%+v", ranSetup.Load(), quit.Load(), u.Status())
 }
