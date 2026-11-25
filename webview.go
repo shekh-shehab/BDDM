@@ -28,8 +28,8 @@ const (
 )
 
 const (
-	bddmWebViewClass    = "BDDMWebView"
-	goWebView2Class     = "webview"
+	bddmWebViewClass = "BDDMWebView"
+	goWebView2Class  = "webview"
 	// Evergreen WebView2 runtime bootstrapper (Microsoft).
 	webview2RuntimeURL = "https://go.microsoft.com/fwlink/p/?LinkId=2124703"
 	webview2NoticeText = "BDDM needs the Microsoft Edge WebView2 Runtime to show its windows.\n\n" +
@@ -393,8 +393,18 @@ func isBDDMHostWindow(class, exe, selfExe string) bool {
 	return base(exe) == "bddm.exe"
 }
 
+// webviewBackgroundARGB is WEBVIEW2_DEFAULT_BACKGROUND_COLOR / ICoreWebView2Controller2
+// DefaultBackgroundColor (AARRGGBB). Alpha is FF; the RGB matches theme.css --page.
+func webviewBackgroundARGB(dark bool) string {
+	if dark {
+		return "FF14161A"
+	}
+	return "FFE6E9EE"
+}
+
 // webviewInitScript runs before every BDDM page: window.close() closes the
-// BDDM window, and the window title follows document.title.
+// BDDM window, and the window title follows document.title. "painted" is
+// posted after two animation frames so the tray host can show only then.
 const webviewInitScript = `(function () {
   var post = function (m) { try { window.chrome.webview.postMessage(m); } catch (e) {} };
   window.close = function () {
@@ -402,12 +412,29 @@ const webviewInitScript = `(function () {
     post("bddm:close");
   };
   var sentReady = false;
+  var sentPainted = false;
+  var sendPainted = function () {
+    if (sentPainted) return;
+    sentPainted = true;
+    if (window.bddmHostStage) { try { window.bddmHostStage("painted"); } catch (e) {} }
+    post("bddm:painted");
+  };
+  var afterPaint = function (fn) {
+    if (typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(function () { requestAnimationFrame(fn); });
+    } else if (typeof setTimeout === "function") {
+      setTimeout(fn, 0);
+    } else {
+      fn();
+    }
+  };
   var sendReady = function () {
     if (sentReady) return;
     if (document.body && (document.body.children.length > 0 || (document.body.innerText || "").trim().length > 0)) {
       sentReady = true;
       if (window.bddmHostStage) { try { window.bddmHostStage("dom_ready"); } catch (e) {} }
       post("bddm:ready");
+      afterPaint(sendPainted);
     }
   };
   var last = "";
@@ -436,6 +463,8 @@ func parseHostMessage(m string) (cmd, arg string) {
 		return "close", ""
 	case m == "bddm:ready":
 		return "ready", ""
+	case m == "bddm:painted":
+		return "painted", ""
 	case strings.HasPrefix(m, "bddm:title:"):
 		t := strings.TrimSpace(strings.TrimPrefix(m, "bddm:title:"))
 		if len(t) > 200 {

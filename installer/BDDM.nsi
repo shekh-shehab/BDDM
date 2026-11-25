@@ -61,13 +61,52 @@ VIAddVersionKey "LegalCopyright" "BDDM"
 
 !insertmacro MUI_LANGUAGE "English"
 
+; Run a BDDM.exe helper (GUI subsystem) without nsExec. nsExec waits on a
+; console that a -H=windowsgui process never attaches, which froze Setup
+; at "Extract: BDDM.exe" and could leave a white WebView2 flash. CreateProcess
+; + WaitForSingleObject has a hard timeout and kills the helper if it hangs.
+; The helper itself is also headless (-quit / -register never open a window).
+!macro ExecBDDMHelper EXE ARGS TIMEOUTMS
+  Push $0
+  Push $1
+  Push $2
+  Push $3
+  Push $4
+  Push $5
+  Push $6
+  System::Alloc 104
+  Pop $0
+  System::Call "*$0(i 104)"
+  System::Alloc 24
+  Pop $1
+  StrCpy $2 '"${EXE}" ${ARGS}'
+  System::Call "kernel32::CreateProcessW(w `${EXE}`, t r2, p 0, p 0, i 0, i 0x08000000, p 0, p 0, p r0, p r1) i .r3"
+  ${If} $3 != 0
+    System::Call "*$1(p .r4, p .r5)"
+    System::Call "kernel32::WaitForSingleObject(p r4, i ${TIMEOUTMS}) i .r6"
+    IntCmp $6 258 0 +2 +2
+      System::Call "kernel32::TerminateProcess(p r4, i 1)"
+    System::Call "kernel32::CloseHandle(p r4)"
+    System::Call "kernel32::CloseHandle(p r5)"
+  ${EndIf}
+  System::Free $0
+  System::Free $1
+  Pop $6
+  Pop $5
+  Pop $4
+  Pop $3
+  Pop $2
+  Pop $1
+  Pop $0
+!macroend
+
 ; Asks a running BDDM to save and quit, then waits for it to exit.
 ; Force-kill only if it is still running after that wait, so an in-app
 ; update is not reported as "BDDM stopped working".
 !macro StopBDDM EXE
   !define StopBDDM_ID ${__LINE__}
   IfFileExists "${EXE}" 0 skip_quit_${StopBDDM_ID}
-    nsExec::Exec '"${EXE}" -quit'
+    !insertmacro ExecBDDMHelper "${EXE}" "-quit" 8000
   skip_quit_${StopBDDM_ID}:
   StrCpy $R9 0
   loop_wait_${StopBDDM_ID}:
@@ -76,7 +115,7 @@ VIAddVersionKey "LegalCopyright" "BDDM"
     Pop $R7
     IntCmp $R8 0 still_${StopBDDM_ID} done_${StopBDDM_ID} still_${StopBDDM_ID}
   still_${StopBDDM_ID}:
-    IntCmp $R9 40 force_${StopBDDM_ID} wait_${StopBDDM_ID} force_${StopBDDM_ID}
+    IntCmp $R9 16 force_${StopBDDM_ID} wait_${StopBDDM_ID} force_${StopBDDM_ID}
   wait_${StopBDDM_ID}:
     Sleep 500
     IntOp $R9 $R9 + 1
@@ -163,7 +202,7 @@ Function .onInstSuccess
   ; Stamp Start menu / desktop shortcuts with BDDM's AppUserModelID so
   ; notifications and the taskbar show BDDM, not Windows PowerShell.
   ; Shortcuts were just (re)created, including on an update of an older install.
-  nsExec::ExecToLog '"$INSTDIR\BDDM.exe" -register'
+  !insertmacro ExecBDDMHelper "$INSTDIR\BDDM.exe" "-register" 8000
   ${If} $StartAfter == "1"
     Exec '"$INSTDIR\BDDM.exe"'
   ${EndIf}

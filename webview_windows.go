@@ -52,8 +52,12 @@ const (
 	vkEscape          = 0x1B
 	swHide            = 0
 	whCBT             = 5
-	hcbtShowWindow    = 0
+	hcbtCreateWnd     = 3           // HCBT_CREATEWND (0 is HCBT_MOVESIZE; there is no HCBT_SHOWWINDOW)
 	gclpHbrBackground = ^uintptr(9) // GCLP_HBRBACKGROUND (-10)
+	wsVisible         = 0x10000000
+	wsExLayered       = 0x00080000
+	lwaAlpha          = 0x00000002
+	offscreenPos      = -32000
 
 	mbYesNo         = 0x00000004
 	mbIconInfo      = 0x00000040
@@ -64,23 +68,24 @@ const (
 )
 
 var (
-	procExtractIconExW      = shell32.NewProc("ExtractIconExW")
-	procSetWindowTextW      = user32.NewProc("SetWindowTextW")
-	procIsZoomed            = user32.NewProc("IsZoomed")
-	procSendMessageW        = user32.NewProc("SendMessageW")
-	procMessageBoxW         = user32.NewProc("MessageBoxW")
-	procGetWindowLongPtr    = user32.NewProc("GetWindowLongPtrW")
-	procGetWindowLong       = user32.NewProc("GetWindowLongW")
-	procSetWindowLongPtr    = user32.NewProc("SetWindowLongPtrW")
-	procSetWindowLong       = user32.NewProc("SetWindowLongW")
-	procCallWindowProcW     = user32.NewProc("CallWindowProcW")
-	procSetWindowsHookExW   = user32.NewProc("SetWindowsHookExW")
-	procUnhookWindowsHookEx = user32.NewProc("UnhookWindowsHookEx")
-	procCallNextHookEx      = user32.NewProc("CallNextHookEx")
-	procSetClassLongPtr     = user32.NewProc("SetClassLongPtrW")
-	procSetClassLong        = user32.NewProc("SetClassLongW")
-	procCreateSolidBrush    = syscall.NewLazyDLL("gdi32.dll").NewProc("CreateSolidBrush")
-	procFillRect            = user32.NewProc("FillRect")
+	procExtractIconExW             = shell32.NewProc("ExtractIconExW")
+	procSetWindowTextW             = user32.NewProc("SetWindowTextW")
+	procIsZoomed                   = user32.NewProc("IsZoomed")
+	procSendMessageW               = user32.NewProc("SendMessageW")
+	procMessageBoxW                = user32.NewProc("MessageBoxW")
+	procGetWindowLongPtr           = user32.NewProc("GetWindowLongPtrW")
+	procGetWindowLong              = user32.NewProc("GetWindowLongW")
+	procSetWindowLongPtr           = user32.NewProc("SetWindowLongPtrW")
+	procSetWindowLong              = user32.NewProc("SetWindowLongW")
+	procCallWindowProcW            = user32.NewProc("CallWindowProcW")
+	procSetWindowsHookExW          = user32.NewProc("SetWindowsHookExW")
+	procUnhookWindowsHookEx        = user32.NewProc("UnhookWindowsHookEx")
+	procCallNextHookEx             = user32.NewProc("CallNextHookEx")
+	procSetClassLongPtr            = user32.NewProc("SetClassLongPtrW")
+	procSetClassLong               = user32.NewProc("SetClassLongW")
+	procCreateSolidBrush           = syscall.NewLazyDLL("gdi32.dll").NewProc("CreateSolidBrush")
+	procFillRect                   = user32.NewProc("FillRect")
+	procSetLayeredWindowAttributes = user32.NewProc("SetLayeredWindowAttributes")
 
 	selfExeOnce sync.Once
 	selfExe     string
@@ -122,17 +127,67 @@ func setClassLongPtr(hwnd, idx, val uintptr) uintptr {
 	return r
 }
 
-var hideWebViewShowHookCB = syscall.NewCallback(hideWebViewShowHook)
+// createStructW is CREATESTRUCTW on amd64 (pointer-aligned after style).
+type createStructW struct {
+	lpCreateParams uintptr
+	hInstance      uintptr
+	hMenu          uintptr
+	hwndParent     uintptr
+	cy, cx, y, x   int32
+	style          int32
+	_pad           int32
+	lpszName       uintptr
+	lpszClass      uintptr
+	dwExStyle      uint32
+}
 
-func hideWebViewShowHook(nCode, wParam, lParam uintptr) uintptr {
-	if int32(nCode) == hcbtShowWindow {
-		class := windowClassName(wParam)
-		if class == goWebView2Class || class == bddmWebViewClass {
-			return 1 // prevent ShowWindow of the host HWND
+type cbtCreateWnd struct {
+	lpcs            uintptr
+	hwndInsertAfter uintptr
+}
+
+var hideWebViewCreateHookCB = syscall.NewCallback(hideWebViewCreateHook)
+
+// hideWebViewCreateHook is a WH_CBT hook. There is no HCBT_SHOWWINDOW; the
+// previous hook used nCode 0 (HCBT_MOVESIZE) and never stopped ShowWindow,
+// which is why a white overlapped window still flashed, then appeared to
+// "close" when we hid it. On HCBT_CREATEWND we move the host HWND off-screen
+// and give it WS_EX_LAYERED so NewWithOptions's ShowWindow is invisible.
+func hideWebViewCreateHook(nCode, wParam, lParam uintptr) uintptr {
+	if int32(nCode) == hcbtCreateWnd && lParam != 0 {
+		cbt := (*cbtCreateWnd)(unsafe.Pointer(lParam))
+		if cbt.lpcs != 0 {
+			cs := (*createStructW)(unsafe.Pointer(cbt.lpcs))
+			class := classNameFromPtr(cs.lpszClass)
+			if class == "" {
+				class = windowClassName(wParam)
+			}
+			if class == goWebView2Class || class == bddmWebViewClass {
+				cs.x = offscreenPos
+				cs.y = offscreenPos
+				cs.style &^= int32(wsVisible)
+				cs.dwExStyle |= uint32(wsExLayered)
+			}
 		}
 	}
 	r, _, _ := procCallNextHookEx.Call(0, nCode, wParam, lParam)
 	return r
+}
+
+func classNameFromPtr(p uintptr) string {
+	if p == 0 || p < 0x10000 { // MAKEINTATOM
+		return ""
+	}
+	return windowsUTF16PtrToString(p)
+}
+
+func windowsUTF16PtrToString(p uintptr) string {
+	u := (*[256]uint16)(unsafe.Pointer(p))
+	n := 0
+	for n < len(u) && u[n] != 0 {
+		n++
+	}
+	return syscall.UTF16ToString(u[:n])
 }
 
 func windowClassName(hwnd uintptr) string {
@@ -145,12 +200,23 @@ func windowClassName(hwnd uintptr) string {
 	return syscall.UTF16ToString(buf[:n])
 }
 
+func setWindowAlpha(hwnd uintptr, alpha byte) {
+	if hwnd == 0 {
+		return
+	}
+	ex := getWindowLongPtr(hwnd, gwlExStyle)
+	if ex&wsExLayered == 0 {
+		setWindowLongPtr(hwnd, gwlExStyle, ex|wsExLayered)
+	}
+	procSetLayeredWindowAttributes.Call(hwnd, 0, uintptr(alpha), lwaAlpha)
+}
+
 // newWebViewHidden runs NewWithOptions with a thread-local WH_CBT hook so the
-// ShowWindow inside go-webview2 is swallowed and the HWND stays hidden while
-// the controller is created (avoids a blank white flash).
+// host HWND is created off-screen and layered (alpha 0). ShowWindow inside
+// go-webview2 then cannot flash a white window.
 func newWebViewHidden(create func() webview2.WebView) webview2.WebView {
 	tid, _, _ := procGetCurrentThreadId.Call()
-	hook, _, err := procSetWindowsHookExW.Call(whCBT, hideWebViewShowHookCB, 0, tid)
+	hook, _, err := procSetWindowsHookExW.Call(whCBT, hideWebViewCreateHookCB, 0, tid)
 	if hook == 0 {
 		log.Printf("window host: WH_CBT hook failed: %v", err)
 	} else {
@@ -159,10 +225,32 @@ func newWebViewHidden(create func() webview2.WebView) webview2.WebView {
 	w := create()
 	if w != nil {
 		if hwnd := uintptr(w.Window()); hwnd != 0 {
+			setWindowAlpha(hwnd, 0)
+			ox, oy := int32(offscreenPos), int32(offscreenPos)
+			procSetWindowPos.Call(hwnd, 0, uintptr(uint32(ox)), uintptr(uint32(oy)), 0, 0, swpNoZOrder|swpNoActivate|swpNosize|swpHideWindow)
 			showWindow(hwnd, swHide)
 		}
 	}
 	return w
+}
+
+func setWebViewDefaultBackground(w webview2.WebView, dark bool) {
+	c := webviewChromium(w)
+	if c == nil {
+		return
+	}
+	ctrl := c.GetController()
+	if ctrl == nil {
+		return
+	}
+	c2 := ctrl.GetICoreWebView2Controller2()
+	if c2 == nil {
+		return
+	}
+	r, g, b := themeBgRGB(dark)
+	if err := c2.PutDefaultBackgroundColor(edge.COREWEBVIEW2_COLOR{A: 255, R: r, G: g, B: b}); err != nil {
+		log.Printf("window host: PutDefaultBackgroundColor: %v", err)
+	}
 }
 
 // webviewChromium returns the go-webview2 Chromium controller, if present,
@@ -212,6 +300,7 @@ type webHost struct {
 	active      bool // has been the active window at least once
 	pageDark    int  // 0 = page has not said yet, 1 = light, 2 = dark
 	domReady    bool
+	painted     bool
 	shown       bool
 	shownAt     time.Time
 	bgBrush     uintptr
@@ -240,9 +329,12 @@ func runWindowHost(u, kind, rectArg string) int {
 	}
 	devtools := webviewDevToolsEnabled()
 	wv2test := webviewTestModeEnabled()
+	dark := themeIsDark(uiTheme(), windowsAppsUseDark())
+	// Must be set before the WebView2 environment is created (NewWithOptions).
+	_ = os.Setenv("WEBVIEW2_DEFAULT_BACKGROUND_COLOR", webviewBackgroundARGB(dark))
 	ver, verErr := webviewloader.GetInstalledVersion()
-	log.Printf("window host: stage=1_start version=%s kind=%s url=%s rect=%s data=%s devtools=%v wv2test=%v webview2=%q err=%v",
-		appVersion, kind, u, r, dataDir, devtools, wv2test, ver, verErr)
+	log.Printf("window host: stage=1_start version=%s kind=%s url=%s rect=%s data=%s devtools=%v wv2test=%v webview2=%q err=%v bg=%s",
+		appVersion, kind, u, r, dataDir, devtools, wv2test, ver, verErr, webviewBackgroundARGB(dark))
 
 	title := windowTitleForURL(u)
 	log.Printf("window host: stage=2_new_with_options Debug=%v DataPath=%s hide=%v", devtools, dataDir, kind == windowKindTray)
@@ -281,6 +373,7 @@ func runWindowHost(u, kind, rectArg string) int {
 		url:  u,
 		wv:   w,
 	}
+	setWebViewDefaultBackground(w, dark)
 	host.configureWindow(r)
 	var cr winRect
 	procGetClientRect.Call(hwnd, uintptr(unsafe.Pointer(&cr)))
@@ -301,9 +394,14 @@ func runWindowHost(u, kind, rectArg string) int {
 	if kind != windowKindTray {
 		host.ready = true
 	} else {
-		time.AfterFunc(2*time.Second, func() {
+		// Do not reveal a still-white surface. Only a last-resort timeout,
+		// after DefaultBackgroundColor is already the theme colour.
+		time.AfterFunc(5*time.Second, func() {
 			if host != nil && host.wv != nil {
-				host.wv.Dispatch(func() { host.revealIfNeeded() })
+				host.wv.Dispatch(func() {
+					log.Printf("window host: stage=7c_reveal_timeout kind=%s painted=%v", host.kind, host.painted)
+					host.revealIfNeeded()
+				})
 			}
 		})
 	}
@@ -335,8 +433,9 @@ func (h *webHost) configureWindow(r windowRect) {
 		// final tray rectangle so the first show is already the right size.
 		showWindow(hwnd, swHide)
 		setWindowLongPtr(hwnd, gwlStyle, wsPopup|wsBorder|wsClipChildren)
-		setWindowLongPtr(hwnd, gwlExStyle, wsExToolWindow|wsExTopmost)
+		setWindowLongPtr(hwnd, gwlExStyle, wsExToolWindow|wsExTopmost|wsExLayered)
 		procSetWindowPos.Call(hwnd, hwndTopmost, uintptr(int32(r.X)), uintptr(int32(r.Y)), uintptr(int32(r.W)), uintptr(int32(r.H)), swpFrameChanged|swpHideWindow|swpNoActivate)
+		setWindowAlpha(hwnd, 0)
 		h.setBackgroundBrush(dark)
 	} else {
 		st := getWindowLongPtr(hwnd, gwlStyle)
@@ -380,6 +479,10 @@ func (h *webHost) bindAndInit() {
 		if stage == "dom_ready" && !h.domReady {
 			h.domReady = true
 			log.Printf("window host: stage=7_dom_ready kind=%s", h.kind)
+		}
+		if stage == "painted" && !h.painted {
+			h.painted = true
+			log.Printf("window host: stage=7a_painted kind=%s", h.kind)
 			if h.kind == windowKindTray {
 				h.wv.Dispatch(func() { h.revealIfNeeded() })
 			}
@@ -397,8 +500,8 @@ func (h *webHost) setBackgroundBrush(dark bool) {
 	h.bgBrush = brush
 }
 
-// revealIfNeeded shows a hidden tray popup after the first paint / DOM ready,
-// then calls put_IsVisible(TRUE) and updates controller bounds (the test1 fix).
+// revealIfNeeded shows a hidden tray popup after the first paint, then calls
+// put_IsVisible(TRUE) and updates controller bounds (the test1 fix).
 func (h *webHost) revealIfNeeded() {
 	if h == nil || h.shown || h.hwnd == 0 {
 		return
@@ -414,11 +517,12 @@ func (h *webHost) revealIfNeeded() {
 		procSendMessageW.Call(h.hwnd, wmSize, 0, 0)
 	}
 	procSetWindowPos.Call(h.hwnd, hwndTopmost, 0, 0, 0, 0, swpNomove|swpNosize|swpShowWindow)
+	setWindowAlpha(h.hwnd, 255)
 	setForegroundWindow(h.hwnd)
 	h.active = true
 	var cr winRect
 	procGetClientRect.Call(h.hwnd, uintptr(unsafe.Pointer(&cr)))
-	log.Printf("window host: stage=7b_revealed kind=%s client=(%d,%d,%d,%d)", h.kind, cr.left, cr.top, cr.right, cr.bottom)
+	log.Printf("window host: stage=7b_revealed kind=%s painted=%v client=(%d,%d,%d,%d)", h.kind, h.painted, cr.left, cr.top, cr.right, cr.bottom)
 }
 
 func (h *webHost) saveMainSize() {

@@ -153,7 +153,8 @@ func TestInstallerSetsAUMIDAndRegister(t *testing.T) {
 	nsi := string(data)
 	for _, want := range []string{
 		`APP_USER_MODEL_ID "BDDM.DownloadManager"`,
-		`BDDM.exe" -register`,
+		`-register`,
+		`ExecBDDMHelper`,
 		`File "/oname=BDDM.png"`,
 		`Delete "$INSTDIR\BDDM.png"`,
 		`Software\Classes\AppUserModelId\${APP_USER_MODEL_ID}`,
@@ -194,5 +195,14 @@ func TestInstallerWaitsForGracefulQuit(t *testing.T) {
 	kill := strings.LastIndex(nsi, `taskkill /IM BDDM.exe /F`)
 	if quit < 0 || wait < 0 || kill < 0 || !(quit < wait && wait < kill) {
 		t.Fatal("force-kill must come after asking BDDM to quit and waiting for it")
+	}
+	if !strings.Contains(nsi, "ExecBDDMHelper") || !strings.Contains(nsi, "WaitForSingleObject") || !strings.Contains(nsi, "TerminateProcess") {
+		t.Fatal("installer helpers must run with CreateProcess and a wait timeout")
+	}
+	if strings.Contains(nsi, `nsExec::Exec '"${EXE}" -quit'`) || strings.Contains(nsi, `nsExec::ExecToLog '"$INSTDIR\BDDM.exe" -register'`) {
+		t.Fatal("must not use nsExec to run the GUI BDDM.exe helper (it hangs)")
+	}
+	if !strings.Contains(nsi, `0x08000000`) {
+		t.Fatal("helper CreateProcess should use CREATE_NO_WINDOW")
 	}
 }

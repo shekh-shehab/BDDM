@@ -281,7 +281,7 @@ func TestIsBDDMHostWindow(t *testing.T) {
 }
 
 func TestWebViewInitScriptAndMessages(t *testing.T) {
-	for _, want := range []string{"window.close = function", "bddm:close", "bddm:ready", "bddm:title:", "chrome.webview.postMessage", "document.title"} {
+	for _, want := range []string{"window.close = function", "bddm:close", "bddm:ready", "bddm:painted", "requestAnimationFrame", "bddm:title:", "chrome.webview.postMessage", "document.title"} {
 		if !strings.Contains(webviewInitScript, want) {
 			t.Errorf("init script missing %q", want)
 		}
@@ -291,6 +291,9 @@ func TestWebViewInitScriptAndMessages(t *testing.T) {
 	}
 	if c, _ := parseHostMessage("bddm:ready"); c != "ready" {
 		t.Fatal("ready message")
+	}
+	if c, _ := parseHostMessage("bddm:painted"); c != "painted" {
+		t.Fatal("painted message")
 	}
 	if c, a := parseHostMessage("bddm:title:Download Video - Song"); c != "title" || a != "Download Video - Song" {
 		t.Fatalf("title message %q %q", c, a)
@@ -334,6 +337,7 @@ func TestWebViewInitScriptRunsCleanly(t *testing.T) {
 		"global.window = {",
 		"  chrome: { webview: { postMessage: (m) => posted.push(m) } },",
 		"  addEventListener: (ev, fn) => { if (ev === 'load') fn(); },",
+		"  requestAnimationFrame: (fn) => fn(),",
 		"  MutationObserver: function() { return { observe: () => {} }; },",
 		"};",
 		"global.MutationObserver = global.window.MutationObserver;",
@@ -344,6 +348,8 @@ func TestWebViewInitScriptRunsCleanly(t *testing.T) {
 		"  querySelector: () => ({}),",
 		"};",
 		"global.setInterval = () => 1;",
+		"global.setTimeout = (fn) => fn();",
+		"global.requestAnimationFrame = (fn) => fn();",
 	}, "\n")
 	tail := strings.Join([]string{
 		"global.document.body = { children: [{}], innerText: 'Downloads' };",
@@ -352,9 +358,22 @@ func TestWebViewInitScriptRunsCleanly(t *testing.T) {
 		"if (!posted.includes('bddm:close')) throw new Error('missing bddm:close: ' + JSON.stringify(posted));",
 		"if (!posted.some(m => m.startsWith('bddm:title:'))) throw new Error('missing title: ' + JSON.stringify(posted));",
 		"if (!posted.includes('bddm:ready')) throw new Error('missing ready: ' + JSON.stringify(posted));",
+		"if (!posted.includes('bddm:painted')) throw new Error('missing painted: ' + JSON.stringify(posted));",
 	}, "\n")
 	cmd := exec.Command(node, "-e", prelude+"\n"+webviewInitScript+"\n"+tail)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("init script failed: %v\n%s", err, out)
+	}
+}
+
+func TestWebViewBackgroundARGB(t *testing.T) {
+	if got := webviewBackgroundARGB(true); got != "FF14161A" {
+		t.Fatalf("dark: %s", got)
+	}
+	if got := webviewBackgroundARGB(false); got != "FFE6E9EE" {
+		t.Fatalf("light: %s", got)
+	}
+	if len(webviewBackgroundARGB(true)) != 8 || len(webviewBackgroundARGB(false)) != 8 {
+		t.Fatal("AARRGGBB must be 8 hex digits")
 	}
 }

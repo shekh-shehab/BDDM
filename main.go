@@ -206,23 +206,41 @@ func (consoleWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+// installerHelperTimeout is how long BDDM.exe -quit may block. The NSIS
+// installer/uninstaller also wraps the process in a wait-with-kill so a
+// hung helper cannot freeze Setup.
+var installerHelperTimeout = 8 * time.Second
+
 // stopRunning asks a running BDDM to quit and waits until it has saved its
-// downloads and closed. If BDDM is already shutting down (the HTTP API may
-// not answer), it still waits for the port to close so the installer does
-// not force-kill the process mid-save.
+// downloads and closed. It never opens a window or starts WebView2, and it
+// always returns within installerHelperTimeout so the installer cannot hang.
 func stopRunning(appURL string) {
-	addr := "127.0.0.1:" + port
-	running := isBDDMRunning(appURL)
-	if !running && !tcpPortOpen(addr, 300*time.Millisecond) {
-		return
+	stopRunningAt(appURL, "127.0.0.1:"+port, installerHelperTimeout)
+}
+
+func stopRunningAt(appURL, addr string, timeout time.Duration) {
+	if timeout <= 0 {
+		timeout = installerHelperTimeout
 	}
-	if running {
-		c := http.Client{Timeout: 3 * time.Second}
-		if resp, err := c.Post(appURL+"/api/quit", "application/json", nil); err == nil {
-			resp.Body.Close()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		running := isBDDMRunning(appURL)
+		if !running && !tcpPortOpen(addr, 300*time.Millisecond) {
+			return
 		}
+		if running {
+			c := http.Client{Timeout: 3 * time.Second}
+			if resp, err := c.Post(appURL+"/api/quit", "application/json", nil); err == nil {
+				resp.Body.Close()
+			}
+		}
+		_ = waitForClosedPort(addr, timeout, 0)
+	}()
+	select {
+	case <-done:
+	case <-time.After(timeout):
 	}
-	_ = waitForClosedPort(addr, 20*time.Second, 500*time.Millisecond)
 }
 
 // tcpPortOpen is true when something is accepting connections on addr.

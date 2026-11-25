@@ -54,3 +54,22 @@ func TestWaitForClosedPortAlreadyClosed(t *testing.T) {
 		t.Fatalf("waited too long for an already-closed port: %s", time.Since(start))
 	}
 }
+
+func TestStopRunningAtTimesOut(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	addr := ln.Addr().String()
+	start := time.Now()
+	stopRunningAt("http://"+addr, addr, 300*time.Millisecond)
+	elapsed := time.Since(start)
+	if elapsed > 2*time.Second {
+		t.Fatalf("stopRunningAt did not honour the timeout: %s", elapsed)
+	}
+	if elapsed < 200*time.Millisecond {
+		// The port is open and is not a BDDM API, so we should wait until the timeout.
+		t.Fatalf("stopRunningAt returned too quickly on an open port: %s", elapsed)
+	}
+}
