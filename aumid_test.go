@@ -157,7 +157,7 @@ func TestInstallerSetsAUMIDAndRegister(t *testing.T) {
 		`File "/oname=BDDM.png"`,
 		`Delete "$INSTDIR\BDDM.png"`,
 		`Software\Classes\AppUserModelId\${APP_USER_MODEL_ID}`,
-		`!define VERSION "1.5.0"`,
+		`!define VERSION "1.5.1"`,
 	} {
 		if !strings.Contains(nsi, want) {
 			t.Errorf("BDDM.nsi missing %q", want)
@@ -171,9 +171,9 @@ func TestInstallerSetsAUMIDAndRegister(t *testing.T) {
 	}
 }
 
-func TestAppVersionIs150(t *testing.T) {
-	if appVersion != "1.5.0" {
-		t.Fatalf("appVersion = %q, want 1.5.0", appVersion)
+func TestAppVersionIs151(t *testing.T) {
+	if appVersion != "1.5.1" {
+		t.Fatalf("appVersion = %q, want 1.5.1", appVersion)
 	}
 }
 
