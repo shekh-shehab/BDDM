@@ -306,6 +306,27 @@ func openAppWindow(u string) error { return openAppWindowSize(u, mainWindowWidth
 // 900x650 DIP, centred on the work area; later opens remember a size the
 // user chose themselves.
 func openAppWindowSize(u string, w, h int) error {
+	if isMainAppURL(u) {
+		if hwnd := existingMainWindowHWND(); hwnd != 0 {
+			activateWindow(hwnd)
+			return nil
+		}
+	}
+	if webview2Ready() {
+		kind := windowKindForURL(u)
+		if kind == windowKindTray {
+			openTrayPopupWindow(u, w, h)
+			return nil
+		}
+		return launchWindowHost(u, kind, hostRectFor(kind, w, h), func() error { return openEdgeAppWindowSize(u, w, h) })
+	}
+	noteWebView2Missing()
+	return openEdgeAppWindowSize(u, w, h)
+}
+
+// openEdgeAppWindowSize is the fallback when the WebView2 runtime is
+// missing: an Edge (or Chrome) --app window with sync and sign-in off.
+func openEdgeAppWindowSize(u string, w, h int) error {
 	force := isMainAppURL(u) && shouldForceMainWindowDefault()
 	if isMainAppURL(u) {
 		if hwnd := existingMainWindowHWND(); hwnd != 0 {

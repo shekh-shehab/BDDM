@@ -490,6 +490,20 @@ func openTrayPopupWindow(u string, w, h int) {
 		activateWindow(hwnd)
 		return
 	}
+	if webview2Ready() {
+		r := windowRect{x, y, pw, ph}
+		_ = launchWindowHost(u, windowKindTray, r, func() error {
+			openTrayPopupEdge(u, w, h, x, y, pw, ph, dpi)
+			return nil
+		})
+		return
+	}
+	noteWebView2Missing()
+	openTrayPopupEdge(u, w, h, x, y, pw, ph, dpi)
+}
+
+// openTrayPopupEdge is the Edge --app fallback for the tray popup.
+func openTrayPopupEdge(u string, w, h, x, y, pw, ph, dpi int) {
 	dir := trayUserDataDir()
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		log.Printf("tray popup: user-data-dir: %v", err)

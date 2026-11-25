@@ -33,9 +33,7 @@ func bddmConfigDir() string {
 // appUserDataDir is a dedicated Edge/Chrome profile for BDDM app windows
 // (not the tray popup). A fresh profile cannot inherit a maximized or
 // huge size saved in the user's default browser profile.
-func appUserDataDir() string {
-	return filepath.Join(bddmConfigDir(), "chromium-app")
-}
+func appUserDataDir() string { return edgeFallbackDir("app") }
 
 func mainWindowDefaultMarkerPath() string {
 	return filepath.Join(bddmConfigDir(), mainWindowDefaultMarker)
@@ -63,12 +61,8 @@ func appChromiumArgs(url, userDataDir string, w, h, x, y int, withPos bool) []st
 	if h < 1 {
 		h = mainWindowHeight
 	}
-	args := []string{
-		"--user-data-dir=" + userDataDir,
-		"--no-first-run",
-		"--no-default-browser-check",
-		fmt.Sprintf("--window-size=%d,%d", w, h),
-	}
+	args := append([]string{"--user-data-dir=" + userDataDir}, edgeFallbackFlags()...)
+	args = append(args, fmt.Sprintf("--window-size=%d,%d", w, h))
 	if withPos {
 		args = append(args, fmt.Sprintf("--window-position=%d,%d", x, y))
 	}
@@ -130,9 +124,7 @@ func mainWindowCenteredRect(workL, workT, workR, workB, dipW, dipH, dpi int) (x,
 // (video, confirm, progress, complete, error, Drive, torrent). It is not
 // the main-window profile and not the tray profile, so a large saved size
 // cannot leak into these windows.
-func popupUserDataDir() string {
-	return filepath.Join(bddmConfigDir(), "chromium-popup")
-}
+func popupUserDataDir() string { return edgeFallbackDir("popup") }
 
 func popupURLPath(raw string) string {
 	raw = strings.TrimSpace(raw)

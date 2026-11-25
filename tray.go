@@ -1,10 +1,6 @@
 package main
 
-import (
-	"fmt"
-	"os"
-	"path/filepath"
-)
+import "fmt"
 
 // Tray menu labels (item 29). Kept here so tests and the Windows menu
 // stay in English and in sync.
@@ -124,22 +120,15 @@ func openTrayPopup(port string) {
 // trayChromiumArgs launches a dedicated Edge/Chrome profile so the popup
 // cannot inherit the main BDDM window's saved size.
 func trayChromiumArgs(url, userDataDir string, w, h, x, y int) []string {
-	return []string{
-		"--user-data-dir=" + userDataDir,
-		"--no-first-run",
-		"--no-default-browser-check",
+	args := append([]string{"--user-data-dir=" + userDataDir}, edgeFallbackFlags()...)
+	return append(args,
 		fmt.Sprintf("--window-size=%d,%d", w, h),
 		fmt.Sprintf("--window-position=%d,%d", x, y),
-		"--app=" + url,
-	}
+		"--app="+url,
+	)
 }
 
-func trayUserDataDir() string {
-	if d, err := os.UserConfigDir(); err == nil && d != "" {
-		return filepath.Join(d, "BDDM", "chromium-tray")
-	}
-	return filepath.Join(".", "BDDM-data", "chromium-tray")
-}
+func trayUserDataDir() string { return edgeFallbackDir("tray") }
 
 func dipToPhysical(v, dpi int) int {
 	if dpi < 96 {

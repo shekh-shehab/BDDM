@@ -54,6 +54,7 @@ func TestAppChromiumArgs(t *testing.T) {
 		"--user-data-dir=" + dir,
 		"--no-first-run",
 		"--no-default-browser-check",
+		"--disable-sync",
 		"--window-size=900,650",
 		"--window-position=100,80",
 		"--app=" + url,
@@ -67,10 +68,10 @@ func TestAppChromiumArgs(t *testing.T) {
 		t.Fatalf("position should be omitted when withPos is false: %s", noPos)
 	}
 	got := appUserDataDir()
-	if !strings.Contains(got, "chromium-app") || !strings.Contains(got, "BDDM") {
+	if !strings.Contains(got, "edge-fallback") || !strings.Contains(got, "BDDM") || strings.Contains(got, "chromium-app") {
 		t.Fatalf("appUserDataDir = %q", got)
 	}
-	if strings.Contains(got, "chromium-tray") {
+	if got == trayUserDataDir() {
 		t.Fatalf("main window profile must not be the tray profile: %q", got)
 	}
 }
@@ -138,10 +139,10 @@ func TestIsPopupWindowTitle(t *testing.T) {
 
 func TestPopupUserDataDir(t *testing.T) {
 	got := popupUserDataDir()
-	if !strings.Contains(got, "chromium-popup") || !strings.Contains(got, "BDDM") {
+	if !strings.Contains(got, "edge-fallback") || !strings.Contains(got, "popup") || !strings.Contains(got, "BDDM") {
 		t.Fatalf("popupUserDataDir = %q", got)
 	}
-	if strings.Contains(got, "chromium-app") || strings.Contains(got, "chromium-tray") {
+	if got == appUserDataDir() || got == trayUserDataDir() {
 		t.Fatalf("popup profile must be separate from main and tray: %q", got)
 	}
 }

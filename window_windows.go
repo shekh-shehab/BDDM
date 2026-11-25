@@ -48,7 +48,7 @@ func windowFrameSize(hwnd uintptr) (fw, fh int) {
 func findPopupHWND(title string) uintptr {
 	title = strings.TrimSpace(title)
 	var family uintptr
-	for _, w := range enumTopWindows() {
+	for _, w := range listBDDMAppWindows() {
 		if !isPopupWindowTitle(w.title) {
 			continue
 		}

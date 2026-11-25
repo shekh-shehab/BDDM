@@ -28,13 +28,20 @@ import (
 const port = "9614"
 
 // appVersion is the BDDM version shown in Settings and on the update notice.
-const appVersion = "1.5.3"
+const appVersion = "1.5.4"
 
 func main() {
 	noWindow := flag.Bool("nowindow", false, "do not open the window (run in the background)")
 	quitRunning := flag.Bool("quit", false, "stop a running BDDM (downloads are paused and saved) and exit")
 	registerOnly := flag.Bool("register", false, "update this install's Windows shortcuts and notifications, then exit")
+	windowURL := flag.String("window", "", "internal: show one BDDM page in a WebView2 window")
+	windowKind := flag.String("window-kind", windowKindPage, "internal: main, page, popup or tray")
+	windowRectArg := flag.String("window-rect", "", "internal: x,y,w,h in physical pixels")
 	flag.Parse()
+	if *windowURL != "" { // helper process for one BDDM window (bug 76)
+		setupWindowHostLog()
+		os.Exit(runWindowHost(*windowURL, *windowKind, *windowRectArg))
+	}
 	appURL := "http://127.0.0.1:" + port
 	if *registerOnly { // used by the installer after it creates shortcuts
 		if err := registerAppIdentity(); err != nil {
@@ -151,6 +158,7 @@ func main() {
 		}
 	}
 
+	prepareWindowHosts()
 	startTray(port, quit, m)
 	startTaskbar(m)
 
@@ -251,4 +259,17 @@ func sendToRunning(appURL, link string) {
 	if err == nil {
 		resp.Body.Close()
 	}
+}
+
+// setupWindowHostLog sends a window helper's log to window-host.log, so it
+// never truncates bddm.log of the running BDDM.
+func setupWindowHostLog() {
+	dir := bddmConfigDir()
+	_ = os.MkdirAll(dir, 0755)
+	f, err := os.OpenFile(filepath.Join(dir, "window-host.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		log.SetOutput(io.Discard)
+		return
+	}
+	log.SetOutput(f)
 }

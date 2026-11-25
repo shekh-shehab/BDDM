@@ -87,6 +87,7 @@ func TestTrayChromiumArgs(t *testing.T) {
 		"--user-data-dir=" + dir,
 		"--no-first-run",
 		"--no-default-browser-check",
+		"--disable-sync",
 		"--window-size=260,248",
 		"--window-position=100,200",
 		"--app=" + url,
@@ -99,10 +100,10 @@ func TestTrayChromiumArgs(t *testing.T) {
 		t.Fatal("test fixture path")
 	}
 	got := trayUserDataDir()
-	if !strings.Contains(got, "chromium-tray") || !strings.Contains(got, "BDDM") {
+	if !strings.Contains(got, "edge-fallback") || !strings.Contains(got, "tray") || !strings.Contains(got, "BDDM") {
 		t.Fatalf("trayUserDataDir = %q", got)
 	}
-	if strings.Contains(got, "chromium-tray") && strings.Contains(strings.ToLower(got), "user data") && strings.Contains(got, "Edge") {
+	if strings.Contains(got, "chromium-tray") {
 		t.Fatalf("tray profile must not be the browser's default profile: %q", got)
 	}
 }
