@@ -430,3 +430,33 @@ func TestVideoDriveErrorRenders(t *testing.T) {
 	chromeShot(t, chrome, base+"/error.html?id=errshot&scheme=light", filepath.Join(dir, "27-error-light.png"), 420, 300)
 	chromeShot(t, chrome, base+"/error.html?id=errshot&scheme=dark", filepath.Join(dir, "27-error-dark.png"), 420, 300)
 }
+
+func TestSettingsAndAboutRedesign(t *testing.T) {
+	index := readUI(t, "index.html")
+	for _, want := range []string{
+		`id="tab-settings"`, `id="setDir"`, `id="setParts"`, `id="setActive"`,
+		`id="setYield"`, `id="setNotify"`, `id="setAsk"`, `id="setResume"`,
+		`id="setAutostart"`, `id="setCheckUpdates"`, `id="saveSettings"`,
+		`id="cats"`, `id="saveCats"`, `id="appVersion"`, `id="checkUpdatesBtn"`,
+		`id="settingsInstallBtn"`, `id="updateStatus"`, `id="setCookies"`,
+		`id="toolsList"`, `id="toolsInstall"`, `id="aboutCard"`, `src="icon.png"`,
+		"Slow down downloads while I use the internet", "Saving bandwidth",
+		`id="limHTTP"`, `id="resetLimits"`,
+	} {
+		if !strings.Contains(index, want) {
+			t.Errorf("settings/about missing %q", want)
+		}
+	}
+}
+
+func TestSettingsAndAboutRenders(t *testing.T) {
+	chrome := findChrome()
+	if chrome == "" {
+		t.Skip("no chrome for a screenshot")
+	}
+	m, _ := newTestManager(t, 4)
+	base := startUITestServer(t, m)
+	dir := "ui-shots"
+	chromeShot(t, chrome, base+"/?tab=settings&scheme=light", filepath.Join(dir, "28-settings-light.png"), 1100, 1400)
+	chromeShot(t, chrome, base+"/?tab=settings&scheme=dark", filepath.Join(dir, "28-settings-dark.png"), 1100, 1400)
+}

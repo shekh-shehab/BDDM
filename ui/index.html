@@ -99,8 +99,29 @@
   .logo img { width: 26px; height: 26px; border-radius: 6px; display: block; }
   #yieldHint { display: none; font-size: 12px; color: var(--muted); background: var(--panel2); border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px; white-space: nowrap; }
   #yieldHint.show { display: inline-flex; align-items: center; }
-  .about-logo { display: flex; flex-direction: column; align-items: center; margin-top: 20px; }
-  .about-logo img { width: 64px; height: 64px; border-radius: 14px; }
+  .about-logo { display: flex; flex-direction: column; align-items: center; margin-top: 0; }
+  .about-logo img { width: 72px; height: 72px; border-radius: 20px; }
+  .about-name { font-size: 16px; font-weight: 600; margin-top: 8px; }
+  .about-card { background: var(--surface); border: 1px solid var(--border); border-radius: 18px; padding: 22px 18px; max-width: 640px; margin-top: 16px; text-align: center; }
+  #tab-settings { max-width: 680px; }
+  #tab-settings h2 { font-size: 16px; font-weight: 600; margin: 0 0 12px; }
+  #tab-settings input[type=text], #tab-settings input[type=number], #tab-settings select {
+    font: inherit; color: var(--text); background: var(--neutral); border: 1px solid var(--border);
+    border-radius: 12px; padding: 8px 12px; outline: none;
+  }
+  #tab-settings input:focus, #tab-settings select:focus { border-color: var(--accent); }
+  .field.check { display: flex; flex-direction: row-reverse; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; border-top: 1px solid var(--border); }
+  .field.check label { flex: 1; font-weight: 500; }
+  .field.check input[type=checkbox] {
+    appearance: none; -webkit-appearance: none; width: 38px; height: 22px; border-radius: 999px;
+    background: var(--border-strong); border: 0; position: relative; cursor: pointer; flex: none;
+  }
+  .field.check input[type=checkbox]::after {
+    content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%;
+    background: var(--surface); transition: left .15s;
+  }
+  .field.check input[type=checkbox]:checked { background: var(--accent); }
+  .field.check input[type=checkbox]:checked::after { left: 19px; }
   nav { display: flex; gap: 4px; }
   nav button { background: transparent; border-color: transparent; color: var(--muted); }
   nav button.active { background: var(--panel2); border-color: var(--line); color: var(--text); }
@@ -288,6 +309,7 @@
   </section>
 
   <section id="tab-settings" hidden>
+    <h2>Settings</h2>
     <div class="card settings-card">
       <div class="field">
         <label for="setDir">Download folder</label>
@@ -350,14 +372,17 @@
       <div id="cats"></div>
       <button id="saveCats" class="primary" style="margin-top:8px">Save folders</button>
     </div>
-    <div class="about-logo">
-      <img src="icon.png" alt="BDDM">
-      <div class="hint" id="appVersion" style="margin-top:10px;text-align:center"></div>
-    </div>
-    <div style="text-align:center;margin-top:8px">
-      <button id="checkUpdatesBtn" class="small">Check for updates</button>
-      <button id="settingsInstallBtn" class="small primary" hidden>Install</button>
-      <div id="updateStatus" class="hint" style="margin-top:6px"></div>
+    <div class="about-card" id="aboutCard">
+      <div class="about-logo">
+        <img src="icon.png" alt="BDDM">
+        <div class="about-name">BDDM</div>
+        <div class="hint" id="appVersion" style="margin-top:6px;text-align:center"></div>
+      </div>
+      <div style="margin-top:12px">
+        <button id="checkUpdatesBtn" class="pill">Check for updates</button>
+        <button id="settingsInstallBtn" class="pill prim" hidden>Install</button>
+        <div id="updateStatus" class="hint" style="margin-top:8px"></div>
+      </div>
     </div>
     <div class="card settings-card" style="margin-top:16px">
       <div class="field" style="margin-bottom:8px">
