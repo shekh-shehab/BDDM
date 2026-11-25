@@ -610,3 +610,109 @@ func TestTrayTooltipFormat(t *testing.T) {
 		t.Error("Windows tray should update the tooltip while downloads run")
 	}
 }
+
+func TestExtensionPopupRedesign(t *testing.T) {
+	htmlB, err := os.ReadFile(filepath.Join("extension", "popup.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cssB, err := os.ReadFile(filepath.Join("extension", "popup.css"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	html, css := string(htmlB), string(cssB)
+	for _, want := range []string{
+		`id="status"`, `id="videos"`, `id="videoList"`, `id="enabled"`,
+		`id="siteOn"`, `id="siteName"`, `id="permRow"`, `id="grant"`,
+		`id="open"`, `id="offlineHelp"`, `id="excluded"`, `id="save"`,
+		"Catch downloads", "On this site", "Open BDDM", "Download with BDDM",
+		"Sites to skip", "Allow access",
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("popup.html missing %q", want)
+		}
+	}
+	if strings.Contains(html, "go run") {
+		t.Error("popup help should not tell Windows users to run go")
+	}
+	for _, want := range []string{
+		"prefers-color-scheme: dark", "--accent: #2f6fed", "--page: #14161a",
+		".chip", "border-radius: 999px", "300px",
+	} {
+		if !strings.Contains(css, want) {
+			t.Errorf("popup.css missing %q", want)
+		}
+	}
+	assertEnglishUI(t, "extension/popup.html", html)
+	assertEnglishUI(t, "extension/popup.css", css)
+}
+
+func TestExtensionPopupRenders(t *testing.T) {
+	chrome := findChrome()
+	if chrome == "" {
+		t.Skip("no chrome for a screenshot")
+	}
+	dir := t.TempDir()
+	// Serve the extension folder so icons and CSS resolve; use a preview
+	// page that does not need the chrome.runtime API.
+	preview := `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>BDDM</title>
+<link rel="stylesheet" href="/popup.css">
+</head><body>
+  <header>
+    <img src="/icons/icon32.png" alt="">
+    <span class="title">BDDM</span>
+    <span id="status" class="status on">Connected</span>
+  </header>
+  <section id="videos">
+    <div class="vhead"><span class="label">Video found on this page</span> <span class="hint">1 video</span></div>
+    <div><span class="chip">1080p, 420 MB</span><span class="chip">720p, 260 MB</span></div>
+    <ul id="videoList">
+      <li><div class="vtext"><div class="vtitle">The Last Adventure — Official Trailer</div><div class="hint">example.com</div></div>
+      <button class="small primary">Download with BDDM</button></li>
+    </ul>
+  </section>
+  <div class="row">
+    <div><div class="label">Catch downloads</div><div class="hint">Send browser downloads to BDDM</div></div>
+    <label class="switch"><input type="checkbox" checked><span></span></label>
+  </div>
+  <div class="row">
+    <div><div class="label">On this site</div><div class="hint" id="siteName">example.com</div></div>
+    <label class="switch"><input type="checkbox" checked><span></span></label>
+  </div>
+  <button id="open" class="primary">Open BDDM</button>
+</body></html>`
+	if err := os.WriteFile(filepath.Join(dir, "preview.html"), []byte(preview), 0644); err != nil {
+		t.Fatal(err)
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	mux.Handle("/", http.FileServer(http.Dir("extension")))
+	mux.HandleFunc("/preview.html", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, filepath.Join(dir, "preview.html"))
+	})
+	hs := &http.Server{Handler: mux}
+	go hs.Serve(ln)
+	t.Cleanup(func() { _ = hs.Close() })
+	port := strconv.Itoa(ln.Addr().(*net.TCPAddr).Port)
+	base := "http://127.0.0.1:" + port
+	chromeShot(t, chrome, base+"/preview.html", filepath.Join("ui-shots", "32-extension-popup-light.png"), 300, 420)
+	// Dark: prefer-color-scheme via forced dark in a second preview is hard in
+	// headless without a flag; emulate with --force-dark-mode when available.
+	cmdDark := base + "/preview.html"
+	_ = cmdDark
+	out := filepath.Join("ui-shots", "32-extension-popup-dark.png")
+	cmd := exec.Command(chrome, "--headless=new", "--disable-gpu", "--no-sandbox", "--hide-scrollbars",
+		"--force-dark-mode", "--window-size=300,420", "--virtual-time-budget=4000",
+		"--screenshot="+out, base+"/preview.html")
+	cmd.Env = append(os.Environ(), "DBUS_SESSION_BUS_ADDRESS=")
+	if b, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("dark popup shot: %v\n%s", err, b)
+	}
+	if fi, err := os.Stat(out); err != nil || fi.Size() < 1000 {
+		t.Fatalf("dark popup shot missing: %v", err)
+	}
+	t.Logf("wrote %s", out)
+}
