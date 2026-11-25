@@ -70,8 +70,8 @@ func TestHLSCaptureWiredAndExistingFlowsUnchanged(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(bgjs), `importScripts("hls_capture.js", "videos.js")`) {
-		t.Error(`background.js should importScripts("hls_capture.js", "videos.js")`)
+	if !strings.Contains(string(bgjs), `importScripts("hls_capture.js", "overlay_rules.js", "videos.js")`) {
+		t.Error(`background.js should importScripts("hls_capture.js", "overlay_rules.js", "videos.js")`)
 	}
 
 	vj, err := os.ReadFile(filepath.Join("extension", "videos.js"))

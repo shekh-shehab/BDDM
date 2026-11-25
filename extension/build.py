@@ -13,7 +13,7 @@ import json, os, shutil, zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.dirname(HERE)
-FILES = ["background.js", "hls_capture.js", "videos.js", "compat.js", "firefox_capture.js", "content.js", "popup.html", "popup.css", "popup.js", "dup.html", "dup.js", "savepdf.js", "savepdf-bg.js"]
+FILES = ["background.js", "hls_capture.js", "overlay_rules.js", "overlay.js", "videos.js", "compat.js", "firefox_capture.js", "content.js", "popup.html", "popup.css", "popup.js", "dup.html", "dup.js", "savepdf.js", "savepdf-bg.js"]
 
 
 def merge(a, b):

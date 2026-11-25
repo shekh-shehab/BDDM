@@ -5,6 +5,7 @@
       "firefox_capture.js",
       "background.js",
       "hls_capture.js",
+      "overlay_rules.js",
       "videos.js",
       "savepdf-bg.js"
     ]
@@ -35,6 +36,19 @@
       ],
       "all_frames": true,
       "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "compat.js",
+        "overlay_rules.js",
+        "overlay.js"
+      ],
+      "all_frames": true,
+      "run_at": "document_idle"
     },
     {
       "matches": [

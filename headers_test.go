@@ -296,6 +296,8 @@ func TestDirectMediaUsesEngine(t *testing.T) {
 		{AddRequest{URL: "https://cdn.example/a/song.mp3", Kind: "video"}, false},
 		{AddRequest{URL: "https://cdn.example/live/index.m3u8", Kind: "video"}, true},
 		{AddRequest{URL: "https://cdn.example/x/clip.mp4", Kind: "video", Stream: "hls"}, true},
+		{AddRequest{URL: "https://cdn.example/x/clip.mp4", Kind: "video", Dialog: true}, true},
+		{AddRequest{URL: "https://cdn.example/x/clip.mp4", Kind: "media", Dialog: true}, true},
 		{AddRequest{URL: "https://www.youtube.com/watch?v=dQw4w9WgXcQ", Kind: "video"}, true},
 		{AddRequest{URL: "https://vimeo.com/123456", Kind: "video"}, true},
 		{AddRequest{URL: "https://cdn.example/file.zip"}, false},

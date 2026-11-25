@@ -53,6 +53,7 @@ type videoPending struct {
 	playlist *PlaylistInfo
 	dupName  string
 	title    string // page title from the extension, until yt-dlp answers
+	thumb    string // preview from the extension (poster or a captured frame)
 }
 
 type VideoInfo struct {
@@ -185,7 +186,7 @@ func (m *Manager) AddVideoPending(r AddRequest) (JobView, error) {
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return JobView{}, errors.New("Please enter a valid http:// or https:// link.")
 	}
-	vp := &videoPending{state: "loading", title: strings.TrimSpace(r.Title)}
+	vp := &videoPending{state: "loading", title: strings.TrimSpace(r.Title), thumb: safeVideoThumb(r.Thumbnail)}
 	if d := m.FindDone(r.URL); d != nil {
 		// Only warn when the earlier file is still there.
 		if _, err := os.Stat(filepath.Join(d.Dir, d.Name)); err == nil {
@@ -225,6 +226,30 @@ func (m *Manager) AddVideoPending(r AddRequest) (JobView, error) {
 	return v, nil
 }
 
+// safeVideoThumb keeps an http(s) image link or a small data:image preview.
+func safeVideoThumb(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || len(raw) > 512*1024 {
+		return ""
+	}
+	if strings.HasPrefix(raw, "data:image/") {
+		if strings.HasPrefix(raw, "data:image/png;") || strings.HasPrefix(raw, "data:image/jpeg;") ||
+			strings.HasPrefix(raw, "data:image/jpg;") || strings.HasPrefix(raw, "data:image/webp;") ||
+			strings.HasPrefix(raw, "data:image/gif;") {
+			return raw
+		}
+		return ""
+	}
+	if strings.ContainsFunc(raw, func(r rune) bool { return r <= ' ' }) {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return ""
+	}
+	return raw
+}
+
 func firstNonEmpty(s ...string) string {
 	for _, v := range s {
 		if strings.TrimSpace(v) != "" {
@@ -242,7 +267,15 @@ func (m *Manager) VideoPending(id string) (VideoView, error) {
 		return VideoView{}, errors.New("This video is no longer waiting (it was started or cancelled).")
 	}
 	vp := j.vpend
-	v := VideoView{ID: j.ID, URL: j.URL, State: vp.state, Error: vp.err, Title: vp.title, Info: vp.info,
+	info := vp.info
+	if info == nil && vp.thumb != "" {
+		info = &VideoInfo{Title: vp.title, Thumbnail: vp.thumb}
+	} else if info != nil && info.Thumbnail == "" && vp.thumb != "" {
+		cp := *info
+		cp.Thumbnail = vp.thumb
+		info = &cp
+	}
+	v := VideoView{ID: j.ID, URL: j.URL, State: vp.state, Error: vp.err, Title: vp.title, Info: info,
 		Playlist: vp.playlist, Dir: j.Dir, Duplicate: vp.dupName}
 	if vp.state == "tools" && m.tools.Ready() {
 		v.State = "loading"
@@ -629,6 +662,9 @@ func (m *Manager) probeVideo(j *Job) {
 	if isStreamJob(j) && j.vpend.title != "" {
 		// A stream link's own title is just "master" or "index".
 		info.Title = j.vpend.title
+	}
+	if info.Thumbnail == "" && j.vpend.thumb != "" {
+		info.Thumbnail = j.vpend.thumb
 	}
 	j.vpend.info = info
 	j.vpend.playlist = pl

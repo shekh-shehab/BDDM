@@ -107,6 +107,16 @@ need the extension reloaded or loaded again from the extension folder.
   this video with BDDM" also works on a page where a stream was found.
   When it downloads the stream, BDDM sends the player's site (Origin) so
   the video server allows the request.
+- A small "Download with BDDM" button appears on the corner of a playing
+  or visible video on every site, including YouTube, Facebook and
+  Instagram. It stays out of the site's own controls, follows the video
+  you are watching or hovering in a feed, and is hidden on very short
+  clips, tiny players and ads. Click it to open BDDM's compact video
+  window (preview, title, quality, size when known, and Download). The
+  window follows Windows light or dark theme. YouTube, Facebook and
+  similar sites still do not get an automatic window; only the button
+  is added there.
+
 
 4. What was new in 1.4.18
 ------------------------

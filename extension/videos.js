@@ -410,7 +410,7 @@ function ensureReqOrigin(req, frame, tabUrl) {
   if (o) req.headers = Object.assign({}, req.headers || {}, { Origin: o });
 }
 
-async function sendVideo(url, tab, title) {
+async function sendVideo(url, tab, title, extras) {
   const tabUrl = tab && isWebUrl(tab.url) ? tab.url : "";
   // A stream seen on this tab: send the player frame that loaded it as the
   // referer (BDDM also sends its Origin), and say which kind of stream it is.
@@ -432,6 +432,9 @@ async function sendVideo(url, tab, title) {
     stream: v && (v.kind === "hls" || v.kind === "dash") ? v.kind : "",
     cookie: await cookieHeader(url, { referer: cookieRef, storeId: tab && tab.cookieStoreId }),
   };
+  const thumb = extras && extras.thumbnail ? safeThumbnail(extras.thumbnail) : "";
+  if (thumb) req.thumbnail = thumb;
+  if (extras && extras.dialog) req.dialog = true;
   await withBrowserDetails(req, [url], { referer: cookieRef, storeId: tab && tab.cookieStoreId });
   if (v && (v.kind === "hls" || v.kind === "dash")) {
     if (frame && (!req.referer || /^https?:\/\/[^/]+\/?$/.test(req.referer))) req.referer = frame;
@@ -440,10 +443,47 @@ async function sendVideo(url, tab, title) {
   return sendToBDDM(req);
 }
 
+async function handleOverlayDownload(msg, sender) {
+  const tab = sender && sender.tab ? sender.tab : null;
+  const tabUrl = (tab && isWebUrl(tab.url) ? tab.url : "") || (msg && msg.tabUrl) || "";
+  const frameUrl = (msg && msg.frameUrl) || (sender && sender.url) || "";
+  await loadTabs();
+  const list = (tab && tabVideos.get(tab.id) && tabVideos.get(tab.id).list) || [];
+  const target = overlayClickTarget({
+    tabUrl, frameUrl,
+    canonicalUrl: (msg && msg.canonicalUrl) || "",
+    nearbyUrl: (msg && msg.nearbyUrl) || "",
+    videoSrc: (msg && msg.videoSrc) || "",
+    list,
+  }, videoPageInfo);
+  if (!target.url) {
+    notify("BDDM", "No video was found on this page.");
+    return { ok: false, error: "No video was found on this page." };
+  }
+  const title = (msg && msg.title) || (tab && tab.title) || "";
+  const res = await sendVideo(target.url, tab, title, {
+    thumbnail: (msg && msg.thumbnail) || "",
+    dialog: true,
+  });
+  if (res.kind === "ok" || res.kind === "window" || res.kind === "duplicate") {
+    return { ok: true, url: target.url, reason: target.reason };
+  }
+  if (res.kind === "offline") {
+    notify("BDDM is not running", "Start BDDM first, then try again.");
+    return { ok: false, error: "BDDM is not running. Start it first, then try again." };
+  }
+  notify("BDDM could not add this video", res.error || "");
+  return { ok: false, error: res.error || "BDDM could not add this video." };
+}
+
 api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg || sender.id !== api.runtime.id) return false;
   if (msg.type === "listVideos") {
     videosForTab(msg.tabId).then((list) => sendResponse({ ok: true, list }), () => sendResponse({ ok: true, list: [] }));
+    return true;
+  }
+  if (msg.type === "overlayDownload") {
+    handleOverlayDownload(msg, sender).then(sendResponse, (e) => sendResponse({ ok: false, error: e.message }));
     return true;
   }
   if (msg.type === "sendVideo") {

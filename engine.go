@@ -451,6 +451,12 @@ type AddRequest struct {
 	// loaded it and the tab's page (other Referers to try after a 403).
 	Frame string `json:"frame,omitempty"`
 	Page  string `json:"page,omitempty"`
+	// Thumbnail is a preview image (http(s) or a small data:image) from the
+	// page, used until yt-dlp or the playlist probe returns one.
+	Thumbnail string `json:"thumbnail,omitempty"`
+	// Dialog forces the compact video options window, even for a direct
+	// media file (used by the on-video Download button).
+	Dialog bool `json:"dialog,omitempty"`
 }
 
 // DuplicateError is returned by Add when the URL was already downloaded.

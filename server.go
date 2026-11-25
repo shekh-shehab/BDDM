@@ -454,6 +454,9 @@ func (s *server) guard(next http.Handler) http.Handler {
 
 // isVideoRequest decides whether a link goes to the video window.
 func isVideoRequest(req AddRequest) bool {
+	if req.Dialog {
+		return true
+	}
 	if req.Kind == "media" || (req.Kind == "video" && req.Stream == "" && isDirectMediaURL(req.URL)) {
 		// A video/audio file itself (not a page or a stream): the fast
 		// engine downloads it (several connections, resumable) with the
