@@ -17,6 +17,9 @@ func TestIsBDDMUITitle(t *testing.T) {
 		"Family photos - Google Drive folder",
 		"Download Video",
 		"Download Video - episode 1",
+		"Download progress",
+		"Download complete",
+		"Download failed",
 		"http://127.0.0.1:" + port + "/torrent.html?id=1",
 		"127.0.0.1:" + port,
 	}

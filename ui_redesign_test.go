@@ -749,3 +749,108 @@ func TestExtensionPopupRenders(t *testing.T) {
 	}
 	t.Logf("wrote %s", out)
 }
+
+func TestPopupPagesReportFit(t *testing.T) {
+	pages := []string{"video.html", "confirm.html", "progress.html", "complete.html", "error.html", "drive.html", "torrent.html"}
+	for _, name := range pages {
+		page := readUI(t, name)
+		if !strings.Contains(page, `src="fit.js"`) {
+			t.Errorf("%s should include fit.js", name)
+		}
+		if !strings.Contains(page, "bddmFitWindow") {
+			t.Errorf("%s should call bddmFitWindow after it has content", name)
+		}
+		if name == "tray.html" || name == "index.html" {
+			t.Errorf("unexpected page %s", name)
+		}
+	}
+	index, tray := readUI(t, "index.html"), readUI(t, "tray.html")
+	if strings.Contains(index, `src="fit.js"`) || strings.Contains(tray, `src="fit.js"`) {
+		t.Fatal("main window and tray popup must not use the compact-popup fitter")
+	}
+	fit := readUI(t, "fit.js")
+	for _, want := range []string{"/api/window/fit", "scrollHeight", "bddmFitWindow"} {
+		if !strings.Contains(fit, want) {
+			t.Errorf("fit.js missing %q", want)
+		}
+	}
+}
+
+func TestWindowFitAPI(t *testing.T) {
+	m, _ := newTestManager(t, 4)
+	base := startUITestServer(t, m)
+	body := `{"title":"Download Video","width":720,"height":540,"path":"/video.html"}`
+	res, err := http.Post(base+"/api/window/fit", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatalf("fit api: %s", res.Status)
+	}
+	res, err = http.Post(base+"/api/window/fit", "application/json", strings.NewReader(`{"title":"BDDM - Download Manager","width":1100,"height":900,"path":"/"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatalf("ignored fit: %s", res.Status)
+	}
+}
+
+func seedReadyVideo(t *testing.T, m *Manager, dl, id string) *Job {
+	t.Helper()
+	j := &Job{
+		ID: id, URL: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+		Name: "Never Gonna Give You Up", Dir: dl, Status: StatusPending, Kind: "video",
+		vpend: &videoPending{
+			state: "ready",
+			title: "Never Gonna Give You Up",
+			info: &VideoInfo{
+				Title: "Never Gonna Give You Up", Uploader: "Rick Astley", Site: "YouTube", Duration: 213,
+				Qualities: []QualityOpt{
+					{Height: 2160, Label: "2160p", Size: 800 * 1024 * 1024},
+					{Height: 1440, Label: "1440p", Size: 400 * 1024 * 1024},
+					{Height: 1080, Label: "1080p", Size: 220 * 1024 * 1024},
+					{Height: 720, Label: "720p", Size: 120 * 1024 * 1024},
+					{Height: 480, Label: "480p", Size: 60 * 1024 * 1024},
+					{Height: 360, Label: "360p", Size: 30 * 1024 * 1024},
+				},
+				Subtitles: []SubtitleLang{{Code: "en", Name: "English"}},
+			},
+		},
+	}
+	m.mu.Lock()
+	m.jobs = append(m.jobs, j)
+	m.mu.Unlock()
+	return j
+}
+
+func TestPopupContentScreenshots(t *testing.T) {
+	chrome := findChrome()
+	if chrome == "" {
+		t.Skip("no chrome for a screenshot")
+	}
+	m, dl := newTestManager(t, 4)
+	seedReadyVideo(t, m, dl, "vid75l")
+	seedReadyVideo(t, m, dl, "vid75d")
+	pend, err := m.AddPending(AddRequest{URL: "https://example.com/film.mp4", Filename: "film.mp4"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prog := &Job{ID: "prog75", URL: "https://example.com/a.bin", Name: "a.bin", Status: StatusDownloading, Size: 100, Dir: dl}
+	prog.done.Store(42)
+	comp := &Job{ID: "comp75", URL: "https://example.com/b.bin", Name: "b.bin", Status: StatusDone, Size: 100, Dir: dl}
+	errJob := &Job{ID: "err75", URL: "https://example.com/c.bin", Name: "c.bin", Status: StatusError, Dir: dl, Error: "HTTP 403 Forbidden"}
+	m.mu.Lock()
+	m.jobs = append(m.jobs, prog, comp, errJob)
+	m.mu.Unlock()
+	base := startUITestServer(t, m)
+	dir := "ui-shots"
+	chromeShot(t, chrome, base+"/video.html?id=vid75l&scheme=light", filepath.Join(dir, "75-video-light.png"), 720, 580)
+	chromeShot(t, chrome, base+"/video.html?id=vid75d&scheme=dark", filepath.Join(dir, "75-video-dark.png"), 720, 580)
+	chromeShot(t, chrome, base+"/confirm.html?id="+pend.ID+"&scheme=light", filepath.Join(dir, "75-confirm-light.png"), 600, 430)
+	chromeShot(t, chrome, base+"/progress.html?id=prog75&scheme=light", filepath.Join(dir, "75-progress-light.png"), 380, 350)
+	chromeShot(t, chrome, base+"/complete.html?id=comp75&scheme=light", filepath.Join(dir, "75-complete-light.png"), 380, 220)
+	chromeShot(t, chrome, base+"/error.html?id=err75&scheme=light", filepath.Join(dir, "75-error-light.png"), 420, 360)
+}

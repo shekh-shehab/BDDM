@@ -8,9 +8,9 @@
 <link rel="icon" type="image/png" sizes="128x128" href="icon.png">
 <link rel="stylesheet" href="theme.css">
 <style>
-  html, body { margin: 0; height: 100%; }
-  body { display: flex; align-items: stretch; }
-  .window { flex: 1; padding: 22px 22px 18px; text-align: center; background: var(--surface); }
+  html, body { margin: 0; }
+  body { display: flex; flex-direction: column; }
+  .window { flex: none; width: 100%; box-sizing: border-box; padding: 22px 22px 18px; text-align: center; background: var(--surface); }
   .name { font-size: 14px; font-weight: 600; margin: 0 0 4px; word-break: break-word; }
   .actions-row { justify-content: center; margin-top: 16px; }
 </style>
@@ -28,6 +28,7 @@
   </div>
   <p class="hint" id="err" style="color:var(--text-danger);margin-top:8px"></p>
 </div>
+<script src="fit.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
 const id = new URLSearchParams(location.search).get("id") || "";
@@ -97,7 +98,7 @@ $("cancel").onclick = async () => {
   window.close();
 };
 setInterval(tick, 400);
-tick();
+tick().then(() => { if (window.bddmFitWindow) bddmFitWindow(); });
 </script>
 </body>
 </html>

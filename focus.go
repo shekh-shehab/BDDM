@@ -16,6 +16,9 @@ var bddmWindowTitles = []string{
 	"Download Google file",
 	"Download Google Drive folder",
 	"Download Video",
+	"Download progress",
+	"Download complete",
+	"Download failed",
 }
 
 // isBDDMUITitle reports whether title belongs to a BDDM app window.

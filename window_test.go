@@ -96,3 +96,81 @@ func TestForceMainWindowDefaultOnce(t *testing.T) {
 		t.Fatalf("marker contents: %q", raw)
 	}
 }
+
+func TestIsPopupAppURL(t *testing.T) {
+	base := "http://127.0.0.1:9614"
+	for _, u := range []string{
+		base + "/video.html?id=1",
+		base + "/confirm.html?id=1",
+		base + "/progress.html?id=1",
+		base + "/complete.html?id=1",
+		base + "/error.html?id=1",
+		base + "/drive.html?id=1",
+		base + "/torrent.html?id=1",
+		"/video.html",
+	} {
+		if !isPopupAppURL(u) {
+			t.Errorf("expected popup URL %q", u)
+		}
+	}
+	for _, u := range []string{
+		base, base + "/", base + "/index.html", base + "/?add=1", base + "/?tab=settings",
+		base + "/tray.html", "http://127.0.0.1:9614/tray.html",
+	} {
+		if isPopupAppURL(u) {
+			t.Errorf("did not expect popup URL %q", u)
+		}
+	}
+}
+
+func TestIsPopupWindowTitle(t *testing.T) {
+	for _, s := range []string{"Download Video", "Download Video - Never Gonna Give You Up", "Download File Info", "Download progress", "Download complete", "Download failed", "Add torrent", "Download Google Drive folder"} {
+		if !isPopupWindowTitle(s) {
+			t.Errorf("expected popup title %q", s)
+		}
+	}
+	for _, s := range []string{"", "BDDM - Download Manager", "BDDM tray", "Settings", "Microsoft Edge"} {
+		if isPopupWindowTitle(s) {
+			t.Errorf("did not expect popup title %q", s)
+		}
+	}
+}
+
+func TestPopupUserDataDir(t *testing.T) {
+	got := popupUserDataDir()
+	if !strings.Contains(got, "chromium-popup") || !strings.Contains(got, "BDDM") {
+		t.Fatalf("popupUserDataDir = %q", got)
+	}
+	if strings.Contains(got, "chromium-app") || strings.Contains(got, "chromium-tray") {
+		t.Fatalf("popup profile must be separate from main and tray: %q", got)
+	}
+}
+
+func TestPopupFitRect(t *testing.T) {
+	// 720x520 content, 16x39 frame, 100% DPI, 1920x1040 work area.
+	x, y, w, h := popupFitRect(0, 0, 1920, 1040, 720, 520, 16, 39, 96)
+	if w != 720+16 || h != 520+39 {
+		t.Fatalf("100%% size %dx%d, want 736x559", w, h)
+	}
+	if x != (1920-w)/2 || y != (1040-h)/2 {
+		t.Fatalf("100%% origin %d,%d, not centred for %dx%d", x, y, w, h)
+	}
+
+	// 150% DPI: content 720dip = 1080 physical + 16 frame.
+	x, y, w, h = popupFitRect(0, 0, 1920, 1080, 720, 520, 24, 58, 144)
+	if w != 1080+24 || h != 780+58 {
+		t.Fatalf("150%% size %dx%d, want 1104x838", w, h)
+	}
+	if x < 0 || y < 0 || x+w > 1920 || y+h > 1080 {
+		t.Fatalf("150%% %d,%d %dx%d outside the work area", x, y, w, h)
+	}
+
+	// Taller than the work area is capped so the page can scroll.
+	_, _, w, h = popupFitRect(0, 0, 800, 500, 720, 900, 16, 39, 96)
+	if h >= 500 {
+		t.Fatalf("capped height should be inside 500px work area, got %d", h)
+	}
+	if w >= 800 {
+		t.Fatalf("capped width should be inside 800px work area, got %d", w)
+	}
+}

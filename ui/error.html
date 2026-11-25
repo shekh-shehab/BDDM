@@ -8,9 +8,9 @@
 <link rel="icon" type="image/png" sizes="128x128" href="icon.png">
 <link rel="stylesheet" href="theme.css">
 <style>
-  html, body { margin: 0; height: 100%; }
-  body { display: flex; align-items: stretch; }
-  .window { flex: 1; padding: 20px 22px 18px; text-align: center; background: var(--surface); }
+  html, body { margin: 0; }
+  body { display: flex; flex-direction: column; }
+  .window { flex: none; width: 100%; box-sizing: border-box; padding: 20px 22px 18px; text-align: center; background: var(--surface); }
   .ico.danger { width: 48px; height: 48px; border-radius: 50%; font-size: 24px; margin: 0 auto 10px; }
   h1 { font-size: 16px; font-weight: 600; margin: 0; }
   .actions-row { justify-content: center; flex-wrap: wrap; margin-top: 16px; }
@@ -30,6 +30,7 @@
   </div>
   <p class="hint" id="err" style="color:var(--text-danger);margin-top:8px"></p>
 </div>
+<script src="fit.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
 const q = new URLSearchParams(location.search);
@@ -54,6 +55,7 @@ async function api(path, body) {
     $("fix").textContent = j.fix ? ("What to do: " + j.fix) : (j.viewOnly ? "Open it in Firefox and use Save as PDF from the BDDM extension." : "");
     if (j.viewOnly) $("retry").hidden = true;
   } catch (e) { $("err").textContent = e.message; }
+  if (window.bddmFitWindow) bddmFitWindow();
 })();
 $("retry").onclick = async () => {
   $("err").textContent = "";

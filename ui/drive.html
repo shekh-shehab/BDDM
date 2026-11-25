@@ -14,7 +14,7 @@
   body { background: var(--bg); color: var(--text); font: 14px/1.4 "Segoe UI", system-ui, -apple-system, sans-serif; display: flex; flex-direction: column; }
   header { display: flex; align-items: center; gap: 10px; padding: 12px 18px; background: var(--panel); border-bottom: 1px solid var(--line); font-weight: 600; font-size: 15px; }
   header img { width: 24px; height: 24px; flex: none; border-radius: 6px; display: block; }
-  main { flex: 1; padding: 16px 18px 8px; overflow: auto; }
+  main { flex: 0 1 auto; min-height: 0; padding: 16px 18px 8px; overflow: auto; }
   .field { margin-bottom: 13px; }
   .field label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; margin-bottom: 5px; }
   .line { display: flex; gap: 8px; }
@@ -83,6 +83,7 @@
   <button id="cancel">Cancel</button>
   <button id="start" class="primary" disabled>Download</button>
 </footer>
+<script src="fit.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
 const id = new URLSearchParams(location.search).get("id") || "";
@@ -160,6 +161,7 @@ async function load() {
   document.title = root.name + " - Google Drive folder";
   $("tree").textContent = "";
   render(root, $("tree"), []);
+  if (window.bddmFitWindow) bddmFitWindow();
   if (!boxes.length) $("tree").append(el("div", "dim", "This folder is empty (or BDDM could not see its files)."));
   if (v.foreign) $("err").textContent = "Note: " + v.foreign + " item(s) that belong to other folders were left out.";
   update();

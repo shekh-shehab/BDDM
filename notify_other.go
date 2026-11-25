@@ -119,6 +119,9 @@ func openAppWindowSize(u string, w, h int) error {
 		return errors.New("no display; open " + u + " in a browser")
 	}
 	dir := appUserDataDir()
+	if isPopupAppURL(u) {
+		dir = popupUserDataDir()
+	}
 	_ = os.MkdirAll(dir, 0755)
 	args := appChromiumArgs(u, dir, w, h, 0, 0, false)
 	for _, b := range []string{"microsoft-edge", "google-chrome", "chromium", "chromium-browser"} {

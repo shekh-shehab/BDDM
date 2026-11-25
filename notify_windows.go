@@ -316,6 +316,9 @@ func openAppWindowSize(u string, w, h int) error {
 			return nil
 		}
 	}
+	if isPopupAppURL(u) {
+		return openPopupAppWindow(u, w, h)
+	}
 	dir := appUserDataDir()
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		log.Printf("app window: user-data-dir: %v", err)
@@ -454,6 +457,92 @@ func placeNewMainWindow(before map[uintptr]bool, x, y, pw, ph int) {
 		activateWindow(hwnd)
 		if time.Now().After(until) || !isWindow(hwnd) {
 			markMainWindowDefaultApplied()
+			return
+		}
+		time.Sleep(80 * time.Millisecond)
+	}
+}
+
+func openPopupAppWindow(u string, w, h int) error {
+	dir := popupUserDataDir()
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		log.Printf("popup window: user-data-dir: %v", err)
+	}
+	posX, posY, physW, physH, _ := defaultMainWindowPlacement(w, h)
+	dpi := primaryDPI()
+	args := appChromiumArgs(u, dir, w, h, physicalToDIP(posX, dpi), physicalToDIP(posY, dpi), true)
+	candidates, edgeCount := trayBrowserCandidates()
+	before := snapshotHWND()
+	start := func(cmd *exec.Cmd) error {
+		var err error
+		withForeground(func() { err = cmd.Start() })
+		return err
+	}
+	var startedPID int
+	launched := false
+	for i, p := range candidates {
+		if i == edgeCount {
+			cmd := exec.Command("cmd", append([]string{"/c", "start", "", "msedge"}, args...)...)
+			hideConsole(cmd)
+			if start(cmd) == nil {
+				launched = true
+				break
+			}
+		}
+		if fileExists(p) {
+			cmd := exec.Command(p, args...)
+			if start(cmd) == nil {
+				launched = true
+				if cmd.Process != nil {
+					startedPID = cmd.Process.Pid
+				}
+				break
+			}
+		}
+	}
+	if !launched {
+		cmd := exec.Command("rundll32", "url.dll,FileProtocolHandler", u)
+		if err := start(cmd); err != nil {
+			return err
+		}
+	}
+	go afterPopupWindowLaunch(u, before, startedPID, posX, posY, physW, physH)
+	return nil
+}
+
+func afterPopupWindowLaunch(u string, before map[uintptr]bool, startedPID int, x, y, pw, ph int) {
+	if startedPID > 0 {
+		allowSetForegroundWindow(uint32(startedPID))
+	}
+	placeNewPopupWindow(before, x, y, pw, ph)
+	scheduleTagBDDMAppWindows()
+}
+
+func placeNewPopupWindow(before map[uintptr]bool, x, y, pw, ph int) {
+	deadline := time.Now().Add(2 * time.Second)
+	var hwnd uintptr
+	for hwnd == 0 && time.Now().Before(deadline) {
+		for _, w := range newWindowsSince(before) {
+			if isPopupWindowTitle(w.title) || (isChromeWidgetClass(w.class) && isBDDMUITitle(w.title) && !isMainAppWindowTitle(w.title) && !strings.HasPrefix(w.title, "BDDM tray")) {
+				hwnd = w.hwnd
+				break
+			}
+		}
+		if hwnd == 0 {
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+	if hwnd == 0 {
+		return
+	}
+	// Brief initial placement so a restored large size cannot stick.
+	// The page then reports its content size to /api/window/fit.
+	until := time.Now().Add(800 * time.Millisecond)
+	for {
+		showWindow(hwnd, swRestore)
+		setWindowPosRect(hwnd, x, y, pw, ph)
+		activateWindow(hwnd)
+		if time.Now().After(until) || !isWindow(hwnd) {
 			return
 		}
 		time.Sleep(80 * time.Millisecond)

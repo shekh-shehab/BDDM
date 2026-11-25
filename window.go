@@ -2,8 +2,10 @@ package main
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Default main-window size in CSS pixels (DIP). Chromium --window-size
@@ -87,6 +89,124 @@ func mainWindowCenteredRect(workL, workT, workR, workB, dipW, dipH, dpi int) (x,
 		dipH = mainWindowHeight
 	}
 	pw, ph = dipToPhysical(dipW, dpi), dipToPhysical(dipH, dpi)
+	if workR <= workL || workB <= workT {
+		return 0, 0, pw, ph
+	}
+	margin := dipToPhysical(16, dpi)
+	if margin < 8 {
+		margin = 8
+	}
+	workW, workH := workR-workL, workB-workT
+	if pw > workW-2*margin && workW > 2*margin {
+		pw = workW - 2*margin
+	}
+	if ph > workH-2*margin && workH > 2*margin {
+		ph = workH - 2*margin
+	}
+	x = workL + (workW-pw)/2
+	y = workT + (workH-ph)/2
+	if x < workL+margin {
+		x = workL + margin
+	}
+	if y < workT+margin {
+		y = workT + margin
+	}
+	if x+pw > workR-margin {
+		x = workR - margin - pw
+	}
+	if y+ph > workB-margin {
+		y = workB - margin - ph
+	}
+	if x < workL {
+		x = workL
+	}
+	if y < workT {
+		y = workT
+	}
+	return
+}
+
+// popupUserDataDir is a dedicated Edge/Chrome profile for compact popups
+// (video, confirm, progress, complete, error, Drive, torrent). It is not
+// the main-window profile and not the tray profile, so a large saved size
+// cannot leak into these windows.
+func popupUserDataDir() string {
+	return filepath.Join(bddmConfigDir(), "chromium-popup")
+}
+
+func popupURLPath(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if u, err := url.Parse(raw); err == nil && u.Path != "" {
+		return u.Path
+	}
+	if i := strings.IndexAny(raw, "?#"); i >= 0 {
+		raw = raw[:i]
+	}
+	return raw
+}
+
+func isPopupAppURL(u string) bool {
+	p := strings.ToLower(popupURLPath(u))
+	if p == "" {
+		return false
+	}
+	for _, page := range []string{
+		"/video.html", "/confirm.html", "/progress.html", "/complete.html",
+		"/error.html", "/drive.html", "/torrent.html",
+	} {
+		if p == page || strings.HasSuffix(p, page) {
+			return true
+		}
+	}
+	return false
+}
+
+func isPopupWindowTitle(t string) bool {
+	t = strings.TrimSpace(t)
+	if t == "" {
+		return false
+	}
+	for _, n := range []string{
+		"Download Video",
+		"Download File Info",
+		"Download progress",
+		"Download complete",
+		"Download failed",
+		"Download Google Drive folder",
+		"Download Google file",
+		"Add torrent",
+	} {
+		if t == n || strings.HasPrefix(t, n+" ") || strings.HasPrefix(t, n+" -") {
+			return true
+		}
+	}
+	return false
+}
+
+// popupFitRect places a popup whose content is contentDipW x contentDipH
+// (CSS pixels) plus a measured window frame (physical pixels). The result
+// is a physical-pixel rectangle, centred on and clamped to the work area.
+func popupFitRect(workL, workT, workR, workB, contentDipW, contentDipH, frameW, frameH, dpi int) (x, y, pw, ph int) {
+	if dpi < 96 {
+		dpi = 96
+	}
+	if contentDipW < 200 {
+		contentDipW = 200
+	}
+	if contentDipH < 120 {
+		contentDipH = 120
+	}
+	if frameW < 0 {
+		frameW = 0
+	}
+	if frameH < 0 {
+		frameH = 0
+	}
+	pw = dipToPhysical(contentDipW, dpi) + frameW
+	ph = dipToPhysical(contentDipH, dpi) + frameH
 	if workR <= workL || workB <= workT {
 		return 0, 0, pw, ph
 	}

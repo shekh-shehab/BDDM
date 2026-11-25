@@ -442,6 +442,25 @@ func newServer(m *Manager, port string, quit func(), upd *Updater) http.Handler 
 		}
 		writeJSON(w, 200, s.upd.Cancel())
 	})
+	mux.HandleFunc("POST /api/window/fit", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Title  string `json:"title"`
+			Width  int    `json:"width"`
+			Height int    `json:"height"`
+			Path   string `json:"path"`
+		}
+		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<12)).Decode(&body)
+		if body.Path != "" && !isPopupAppURL(body.Path) && !isPopupAppURL("http://127.0.0.1"+body.Path) {
+			writeJSON(w, 200, map[string]any{"ok": true, "ignored": true})
+			return
+		}
+		if body.Path == "" && body.Title != "" && !isPopupWindowTitle(body.Title) {
+			writeJSON(w, 200, map[string]any{"ok": true, "ignored": true})
+			return
+		}
+		go applyPopupFit(body.Title, body.Width, body.Height)
+		writeJSON(w, 200, map[string]any{"ok": true})
+	})
 	mux.HandleFunc("POST /api/pauseall", func(w http.ResponseWriter, r *http.Request) {
 		m.PauseAll()
 		reply(w, nil)
