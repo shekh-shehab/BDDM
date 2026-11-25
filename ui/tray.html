@@ -9,9 +9,9 @@
 <link rel="stylesheet" href="theme.css">
 <script src="scheme.js"></script>
 <style>
-  html, body { margin: 0; background: var(--page); }
-  body { width: 260px; }
-  .popup { background: var(--surface); padding: 10px; display: flex; flex-direction: column; gap: 2px; }
+  html, body { margin: 0; background: var(--page); overflow: hidden; }
+  body { width: 260px; overflow: hidden; }
+  .popup { background: var(--surface); padding: 10px; display: flex; flex-direction: column; gap: 2px; overflow: hidden; }
   .head { display: flex; align-items: center; gap: 8px; padding: 4px 8px 8px; }
   .head img { width: 24px; height: 24px; border-radius: 8px; }
   .mi { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; border: 0; background: transparent; border-radius: 12px; padding: 8px 10px; font-size: 13px; color: var(--text); cursor: pointer; }
@@ -83,6 +83,9 @@ $("quit").onclick = async () => {
 if (scheme !== "dark" && scheme !== "light") {
   window.addEventListener("blur", () => window.close());
 }
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") { e.preventDefault(); window.close(); }
+});
 refresh();
 </script>
 </body>

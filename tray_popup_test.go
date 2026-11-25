@@ -3,6 +3,7 @@ package main
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestTrayPopupRect(t *testing.T) {
@@ -119,6 +120,9 @@ func TestTrayPopupHTMLCompact(t *testing.T) {
 	for _, want := range []string{
 		"/api/open",
 		`addEventListener("blur"`,
+		`addEventListener("keydown"`,
+		`e.key === "Escape"`,
+		"overflow: hidden",
 		"No active downloads",
 		"width: 260px",
 		trayMenuShow, trayMenuAddURL, trayMenuPauseAll, trayMenuSettings, trayMenuQuit,
@@ -126,5 +130,47 @@ func TestTrayPopupHTMLCompact(t *testing.T) {
 		if !strings.Contains(page, want) {
 			t.Errorf("ui/tray.html missing %q", want)
 		}
+	}
+}
+
+func TestTrayPopupOuterFromClient(t *testing.T) {
+	w, h := trayPopupOuterFromClient(260, 248, 2, 2)
+	if w != 262 || h != 250 {
+		t.Fatalf("96dpi-style frame: %dx%d, want 262x250", w, h)
+	}
+	w, h = trayPopupOuterFromClient(390, 372, 2, 2)
+	if w != 392 || h != 374 {
+		t.Fatalf("150%% client + 2px frame: %dx%d", w, h)
+	}
+	w, h = trayPopupOuterFromClient(0, 0, 0, 0)
+	if w != trayPopupWidth || h != trayPopupHeight {
+		t.Fatalf("defaults: %dx%d", w, h)
+	}
+	// Placement of the larger outer size must still sit above the cursor.
+	x, y := trayPopupPlace(1900, 1060, 0, 0, 1920, 1080, 262, 250, 96)
+	if x+262 > 1920-8 || y+250 > 1060 {
+		t.Fatalf("outer place %d,%d 262x250 overflowed", x, y)
+	}
+}
+
+func TestDecideTrayPopupClick(t *testing.T) {
+	now := time.Date(2026, 11, 25, 12, 0, 0, 0, time.UTC)
+	if got := decideTrayPopupClick(false, false, now, time.Time{}); got != trayClickOpen {
+		t.Fatalf("first click: %v, want open", got)
+	}
+	if got := decideTrayPopupClick(true, false, now, time.Time{}); got != trayClickClose {
+		t.Fatalf("second click while open: %v, want close", got)
+	}
+	if got := decideTrayPopupClick(true, true, now, time.Time{}); got != trayClickClose {
+		t.Fatalf("second click while hidden/launching window exists: %v, want close", got)
+	}
+	if got := decideTrayPopupClick(false, true, now, time.Time{}); got != trayClickIgnore {
+		t.Fatalf("duplicate click before HWND exists: %v, want ignore (no second process)", got)
+	}
+	if got := decideTrayPopupClick(false, false, now, now.Add(-100*time.Millisecond)); got != trayClickIgnore {
+		t.Fatalf("click that just closed the popup via blur: %v, want ignore", got)
+	}
+	if got := decideTrayPopupClick(false, false, now, now.Add(-time.Second)); got != trayClickOpen {
+		t.Fatalf("click a second later: %v, want open", got)
 	}
 }

@@ -1,6 +1,9 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 // Tray menu labels (item 29). Kept here so tests and the Windows menu
 // stay in English and in sync.
@@ -158,6 +161,22 @@ func trayPopupRect(cursorX, cursorY, workL, workT, workR, workB, dipW, dipH, dpi
 		dipH = trayPopupHeight
 	}
 	pw, ph = dipToPhysical(dipW, dpi), dipToPhysical(dipH, dpi)
+	x, y = trayPopupPlace(cursorX, cursorY, workL, workT, workR, workB, pw, ph, dpi)
+	return
+}
+
+// trayPopupPlace positions a window of already-physical size pw x ph just
+// above the tray cursor and clamps it to the work area.
+func trayPopupPlace(cursorX, cursorY, workL, workT, workR, workB, pw, ph, dpi int) (x, y int) {
+	if dpi < 96 {
+		dpi = 96
+	}
+	if pw < 1 {
+		pw = dipToPhysical(trayPopupWidth, dpi)
+	}
+	if ph < 1 {
+		ph = dipToPhysical(trayPopupHeight, dpi)
+	}
 	margin := dipToPhysical(8, dpi)
 	if margin < 4 {
 		margin = 4
@@ -179,4 +198,49 @@ func trayPopupRect(cursorX, cursorY, workL, workT, workR, workB, dipW, dipH, dpi
 		}
 	}
 	return
+}
+
+// trayPopupOuterFromClient adds the window frame (physical pixels) around a
+// 260x248-DIP client so the WebView2 tray popup has no scrollbars.
+func trayPopupOuterFromClient(clientW, clientH, frameW, frameH int) (int, int) {
+	if clientW < 1 {
+		clientW = trayPopupWidth
+	}
+	if clientH < 1 {
+		clientH = trayPopupHeight
+	}
+	if frameW < 0 {
+		frameW = 0
+	}
+	if frameH < 0 {
+		frameH = 0
+	}
+	return clientW + frameW, clientH + frameH
+}
+
+const trayPopupRetrigger = 400 * time.Millisecond
+
+type trayClickDecision int
+
+const (
+	trayClickOpen trayClickDecision = iota
+	trayClickClose
+	trayClickIgnore
+)
+
+// decideTrayPopupClick chooses what a left-click on the tray icon should do.
+// A second click closes an open or still-launching popup instead of starting
+// another process. A click that just deactivated the popup (the icon click
+// itself) is ignored so it does not immediately reopen.
+func decideTrayPopupClick(popupOpen, launching bool, now, closedAt time.Time) trayClickDecision {
+	if popupOpen {
+		return trayClickClose
+	}
+	if launching {
+		return trayClickIgnore
+	}
+	if !closedAt.IsZero() && now.Sub(closedAt) < trayPopupRetrigger {
+		return trayClickIgnore
+	}
+	return trayClickOpen
 }

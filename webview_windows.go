@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"reflect"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -14,6 +15,7 @@ import (
 	"unsafe"
 
 	"github.com/jchv/go-webview2"
+	"github.com/jchv/go-webview2/pkg/edge"
 	"github.com/jchv/go-webview2/webviewloader"
 )
 
@@ -42,6 +44,16 @@ const (
 	swpNoActivate   = 0x0010
 	swpFrameChanged = 0x0020
 	swpShowWindow   = 0x0040
+	swpHideWindow   = 0x0080
+
+	wmKeyDown         = 0x0100
+	wmSize            = 0x0005
+	wmEraseBkgnd      = 0x0014
+	vkEscape          = 0x1B
+	swHide            = 0
+	whCBT             = 5
+	hcbtShowWindow    = 0
+	gclpHbrBackground = ^uintptr(9) // GCLP_HBRBACKGROUND (-10)
 
 	mbYesNo         = 0x00000004
 	mbIconInfo      = 0x00000040
@@ -52,16 +64,23 @@ const (
 )
 
 var (
-	procExtractIconExW   = shell32.NewProc("ExtractIconExW")
-	procSetWindowTextW   = user32.NewProc("SetWindowTextW")
-	procIsZoomed         = user32.NewProc("IsZoomed")
-	procSendMessageW     = user32.NewProc("SendMessageW")
-	procMessageBoxW      = user32.NewProc("MessageBoxW")
-	procGetWindowLongPtr = user32.NewProc("GetWindowLongPtrW")
-	procGetWindowLong    = user32.NewProc("GetWindowLongW")
-	procSetWindowLongPtr = user32.NewProc("SetWindowLongPtrW")
-	procSetWindowLong    = user32.NewProc("SetWindowLongW")
-	procCallWindowProcW  = user32.NewProc("CallWindowProcW")
+	procExtractIconExW      = shell32.NewProc("ExtractIconExW")
+	procSetWindowTextW      = user32.NewProc("SetWindowTextW")
+	procIsZoomed            = user32.NewProc("IsZoomed")
+	procSendMessageW        = user32.NewProc("SendMessageW")
+	procMessageBoxW         = user32.NewProc("MessageBoxW")
+	procGetWindowLongPtr    = user32.NewProc("GetWindowLongPtrW")
+	procGetWindowLong       = user32.NewProc("GetWindowLongW")
+	procSetWindowLongPtr    = user32.NewProc("SetWindowLongPtrW")
+	procSetWindowLong       = user32.NewProc("SetWindowLongW")
+	procCallWindowProcW     = user32.NewProc("CallWindowProcW")
+	procSetWindowsHookExW   = user32.NewProc("SetWindowsHookExW")
+	procUnhookWindowsHookEx = user32.NewProc("UnhookWindowsHookEx")
+	procCallNextHookEx      = user32.NewProc("CallNextHookEx")
+	procSetClassLongPtr     = user32.NewProc("SetClassLongPtrW")
+	procSetClassLong        = user32.NewProc("SetClassLongW")
+	procCreateSolidBrush    = syscall.NewLazyDLL("gdi32.dll").NewProc("CreateSolidBrush")
+	procFillRect            = user32.NewProc("FillRect")
 
 	selfExeOnce sync.Once
 	selfExe     string
@@ -94,6 +113,91 @@ func setWindowLongPtr(hwnd, idx, val uintptr) uintptr {
 	return r
 }
 
+func setClassLongPtr(hwnd, idx, val uintptr) uintptr {
+	if procSetClassLongPtr.Find() == nil {
+		r, _, _ := procSetClassLongPtr.Call(hwnd, idx, val)
+		return r
+	}
+	r, _, _ := procSetClassLong.Call(hwnd, idx, val)
+	return r
+}
+
+var hideWebViewShowHookCB = syscall.NewCallback(hideWebViewShowHook)
+
+func hideWebViewShowHook(nCode, wParam, lParam uintptr) uintptr {
+	if int32(nCode) == hcbtShowWindow {
+		class := windowClassName(wParam)
+		if class == goWebView2Class || class == bddmWebViewClass {
+			return 1 // prevent ShowWindow of the host HWND
+		}
+	}
+	r, _, _ := procCallNextHookEx.Call(0, nCode, wParam, lParam)
+	return r
+}
+
+func windowClassName(hwnd uintptr) string {
+	var buf [64]uint16
+	procGetClassNameW.Call(hwnd, uintptr(unsafe.Pointer(&buf[0])), 64)
+	n := 0
+	for n < len(buf) && buf[n] != 0 {
+		n++
+	}
+	return syscall.UTF16ToString(buf[:n])
+}
+
+// newWebViewHidden runs NewWithOptions with a thread-local WH_CBT hook so the
+// ShowWindow inside go-webview2 is swallowed and the HWND stays hidden while
+// the controller is created (avoids a blank white flash).
+func newWebViewHidden(create func() webview2.WebView) webview2.WebView {
+	tid, _, _ := procGetCurrentThreadId.Call()
+	hook, _, err := procSetWindowsHookExW.Call(whCBT, hideWebViewShowHookCB, 0, tid)
+	if hook == 0 {
+		log.Printf("window host: WH_CBT hook failed: %v", err)
+	} else {
+		defer procUnhookWindowsHookEx.Call(hook)
+	}
+	w := create()
+	if w != nil {
+		if hwnd := uintptr(w.Window()); hwnd != 0 {
+			showWindow(hwnd, swHide)
+		}
+	}
+	return w
+}
+
+// webviewChromium returns the go-webview2 Chromium controller, if present,
+// so we can call PutIsVisible and Resize after showing a previously hidden HWND.
+func webviewChromium(w webview2.WebView) *edge.Chromium {
+	if w == nil {
+		return nil
+	}
+	v := reflect.ValueOf(w)
+	if v.Kind() == reflect.Interface {
+		v = v.Elem()
+	}
+	if v.Kind() == reflect.Ptr {
+		if v.IsNil() {
+			return nil
+		}
+		v = v.Elem()
+	}
+	if v.Kind() != reflect.Struct {
+		return nil
+	}
+	f := v.FieldByName("browser")
+	if !f.IsValid() {
+		return nil
+	}
+	if !f.CanInterface() {
+		if !f.CanAddr() {
+			return nil
+		}
+		f = reflect.NewAt(f.Type(), unsafe.Pointer(f.UnsafeAddr())).Elem()
+	}
+	c, _ := f.Interface().(*edge.Chromium)
+	return c
+}
+
 // ---------------------------------------------------------------------------
 // Helper process: one WebView2 window via go-webview2 NewWithOptions.
 // ---------------------------------------------------------------------------
@@ -108,6 +212,9 @@ type webHost struct {
 	active      bool // has been the active window at least once
 	pageDark    int  // 0 = page has not said yet, 1 = light, 2 = dark
 	domReady    bool
+	shown       bool
+	shownAt     time.Time
+	bgBrush     uintptr
 }
 
 var host *webHost
@@ -138,19 +245,30 @@ func runWindowHost(u, kind, rectArg string) int {
 		appVersion, kind, u, r, dataDir, devtools, wv2test, ver, verErr)
 
 	title := windowTitleForURL(u)
-	log.Printf("window host: stage=2_new_with_options Debug=%v DataPath=%s", devtools, dataDir)
-	w := webview2.NewWithOptions(webview2.WebViewOptions{
-		Debug:     devtools, // false by default in release builds; true only with BDDM_DEVTOOLS=1 / -devtools
-		DataPath:  dataDir,
-		AutoFocus: true,
-		WindowOptions: webview2.WindowOptions{
-			Title:  title,
-			Width:  uint(r.W),
-			Height: uint(r.H),
-			IconId: 1,
-			Center: false,
-		},
-	})
+	log.Printf("window host: stage=2_new_with_options Debug=%v DataPath=%s hide=%v", devtools, dataDir, kind == windowKindTray)
+	create := func() webview2.WebView {
+		return webview2.NewWithOptions(webview2.WebViewOptions{
+			Debug:     devtools, // false by default in release builds; true only with BDDM_DEVTOOLS=1 / -devtools
+			DataPath:  dataDir,
+			AutoFocus: true,
+			WindowOptions: webview2.WindowOptions{
+				Title:  title,
+				Width:  uint(r.W),
+				Height: uint(r.H),
+				IconId: 1,
+				Center: false,
+			},
+		})
+	}
+	// The tray popup must not flash a blank overlapped window: go-webview2
+	// calls ShowWindow inside NewWithOptions, so we swallow that show (and
+	// keep the HWND hidden/offscreen) until the first paint / DOM ready.
+	var w webview2.WebView
+	if kind == windowKindTray {
+		w = newWebViewHidden(create)
+	} else {
+		w = create()
+	}
 	if w == nil || uintptr(w.Window()) == 0 {
 		log.Printf("window host: stage=2_new_with_options failed for %s (%s)", u, kind)
 		return 4
@@ -180,7 +298,15 @@ func runWindowHost(u, kind, rectArg string) int {
 		w.Navigate(u)
 	}
 
-	host.ready = true
+	if kind != windowKindTray {
+		host.ready = true
+	} else {
+		time.AfterFunc(2*time.Second, func() {
+			if host != nil && host.wv != nil {
+				host.wv.Dispatch(func() { host.revealIfNeeded() })
+			}
+		})
+	}
 	log.Printf("window host: stage=6_run_loop")
 	w.Run()
 	log.Printf("window host: stage=8_closed domReady=%v", host.domReady)
@@ -205,9 +331,13 @@ func (h *webHost) configureWindow(r windowRect) {
 	}
 
 	if h.kind == windowKindTray {
+		// Keep hidden until DOM ready (no SWP_SHOWWINDOW). Position at the
+		// final tray rectangle so the first show is already the right size.
+		showWindow(hwnd, swHide)
 		setWindowLongPtr(hwnd, gwlStyle, wsPopup|wsBorder|wsClipChildren)
 		setWindowLongPtr(hwnd, gwlExStyle, wsExToolWindow|wsExTopmost)
-		procSetWindowPos.Call(hwnd, hwndTopmost, uintptr(int32(r.X)), uintptr(int32(r.Y)), uintptr(int32(r.W)), uintptr(int32(r.H)), swpFrameChanged|swpShowWindow)
+		procSetWindowPos.Call(hwnd, hwndTopmost, uintptr(int32(r.X)), uintptr(int32(r.Y)), uintptr(int32(r.W)), uintptr(int32(r.H)), swpFrameChanged|swpHideWindow|swpNoActivate)
+		h.setBackgroundBrush(dark)
 	} else {
 		st := getWindowLongPtr(hwnd, gwlStyle)
 		setWindowLongPtr(hwnd, gwlStyle, st|wsClipChildren)
@@ -217,7 +347,9 @@ func (h *webHost) configureWindow(r windowRect) {
 	// Subclass NewWithOptions's wndproc for BDDM sizing, theme, DPI and tray blur,
 	// chaining all other messages (including WM_SIZE/WM_DESTROY) to go-webview2.
 	h.origWndProc = setWindowLongPtr(hwnd, gwlpProc, syscall.NewCallback(hostSubclassProc))
-	setForegroundWindow(hwnd)
+	if h.kind != windowKindTray {
+		setForegroundWindow(hwnd)
+	}
 }
 
 func (h *webHost) bindAndInit() {
@@ -248,9 +380,45 @@ func (h *webHost) bindAndInit() {
 		if stage == "dom_ready" && !h.domReady {
 			h.domReady = true
 			log.Printf("window host: stage=7_dom_ready kind=%s", h.kind)
+			if h.kind == windowKindTray {
+				h.wv.Dispatch(func() { h.revealIfNeeded() })
+			}
 		}
 	})
 	h.wv.Init(webviewInitScript)
+}
+
+func (h *webHost) setBackgroundBrush(dark bool) {
+	brush, _, _ := procCreateSolidBrush.Call(uintptr(themeBgColorRef(dark)))
+	if brush == 0 {
+		return
+	}
+	setClassLongPtr(h.hwnd, gclpHbrBackground, brush)
+	h.bgBrush = brush
+}
+
+// revealIfNeeded shows a hidden tray popup after the first paint / DOM ready,
+// then calls put_IsVisible(TRUE) and updates controller bounds (the test1 fix).
+func (h *webHost) revealIfNeeded() {
+	if h == nil || h.shown || h.hwnd == 0 {
+		return
+	}
+	h.shown = true
+	h.shownAt = time.Now()
+	h.ready = true
+	showWindow(h.hwnd, swShow)
+	if c := webviewChromium(h.wv); c != nil {
+		_ = c.Show()
+		c.Resize()
+	} else {
+		procSendMessageW.Call(h.hwnd, wmSize, 0, 0)
+	}
+	procSetWindowPos.Call(h.hwnd, hwndTopmost, 0, 0, 0, 0, swpNomove|swpNosize|swpShowWindow)
+	setForegroundWindow(h.hwnd)
+	h.active = true
+	var cr winRect
+	procGetClientRect.Call(h.hwnd, uintptr(unsafe.Pointer(&cr)))
+	log.Printf("window host: stage=7b_revealed kind=%s client=(%d,%d,%d,%d)", h.kind, cr.left, cr.top, cr.right, cr.bottom)
 }
 
 func (h *webHost) saveMainSize() {
@@ -280,13 +448,32 @@ func hostSubclassProc(hwnd, msg, wp, lp uintptr) uintptr {
 		if h.pageDark == 0 {
 			setTitleBarDark(hwnd, themeIsDark(uiTheme(), windowsAppsUseDark()))
 		}
+	case wmEraseBkgnd:
+		if h.kind == windowKindTray && h.bgBrush != 0 && wp != 0 {
+			var rc winRect
+			procGetClientRect.Call(hwnd, uintptr(unsafe.Pointer(&rc)))
+			procFillRect.Call(wp, uintptr(unsafe.Pointer(&rc)), h.bgBrush)
+			return 1
+		}
+	case wmKeyDown:
+		if h.kind == windowKindTray && wp == vkEscape {
+			procPostMessageW.Call(hwnd, wmClose, 0, 0)
+			return 0
+		}
 	case wmActivate:
-		if wp&0xFFFF == waInactive {
-			// Tray popup: close when another window takes focus.
-			if h.kind == windowKindTray && h.active && h.ready {
-				procPostMessageW.Call(hwnd, wmClose, 0, 0)
+		if h.kind == windowKindTray {
+			if wp&0xFFFF == waInactive {
+				// Close on blur only after the popup has been revealed, and
+				// skip the brief focus dance right after ShowWindow.
+				if h.shown && time.Since(h.shownAt) > 150*time.Millisecond {
+					procPostMessageW.Call(hwnd, wmClose, 0, 0)
+				}
+			} else if h.shown {
+				h.active = true
 			}
-		} else if h.ready {
+			break
+		}
+		if wp&0xFFFF != waInactive && h.ready {
 			h.active = true
 		}
 	case wmGetMinMaxInfo:
@@ -389,6 +576,9 @@ func findHostWindow(pid int) uintptr {
 func launchWindowHost(u, kind string, r windowRect, fallback func() error) error {
 	exe := selfExePath()
 	if exe == "" {
+		if kind == windowKindTray {
+			noteTrayPopupLaunchFailed()
+		}
 		return fallback()
 	}
 	args := append(windowHostArgs(u, kind, r), windowHostThemeArgs(uiTheme())...)
@@ -403,13 +593,22 @@ func launchWindowHost(u, kind string, r windowRect, fallback func() error) error
 	withForeground(func() { err = cmd.Start() })
 	if err != nil {
 		log.Printf("window host: %v", err)
+		if kind == windowKindTray {
+			noteTrayPopupLaunchFailed()
+		}
 		webviewBroken.Store(true)
 		return fallback()
 	}
 	pid := cmd.Process.Pid
 	allowSetForegroundWindow(uint32(pid))
 	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
+	go func() {
+		waitErr := cmd.Wait()
+		if kind == windowKindTray {
+			noteTrayPopupExited()
+		}
+		done <- waitErr
+	}()
 	go func() {
 		deadline := time.Now().Add(15 * time.Second)
 		for time.Now().Before(deadline) {

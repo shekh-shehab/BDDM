@@ -86,6 +86,9 @@ var (
 	trayWndProc = syscall.NewCallback(trayWindowProc)
 	trayClass   = mustUTF16("BDDMTrayHidden")
 	trayTipStop chan struct{}
+
+	trayPopupLaunching bool
+	trayPopupClosedAt  time.Time
 )
 
 type notifyIconData struct {
@@ -316,14 +319,14 @@ func trayWindowProc(hwnd, msg, wparam, lparam uintptr) uintptr {
 		case wmRButtonUp, wmContextMenu:
 			showTrayMenu(hwnd)
 		case wmLButtonUp, ninSelect, wmLButtonDblClk:
+			// NIN_SELECT and WM_LBUTTONUP can both fire for one click when
+			// NOTIFYICON_VERSION_4 is set; treat them (and a double-click)
+			// as a single toggle so we never start two popup processes or
+			// flash a second window. A second click closes the popup.
 			trayMu.Lock()
 			port := trayPort
 			trayMu.Unlock()
-			if uint32(lparam&0xffff) == wmLButtonDblClk {
-				_ = openAppWindow(trayShowURL(port))
-			} else {
-				openTrayPopup(port)
-			}
+			openTrayPopup(port)
 		}
 		return 0
 	case wmDestroy:
@@ -386,11 +389,13 @@ const (
 )
 
 var (
-	procMonitorFromPoint = user32.NewProc("MonitorFromPoint")
-	procGetMonitorInfoW  = user32.NewProc("GetMonitorInfoW")
-	procGetDpiForSystem  = user32.NewProc("GetDpiForSystem")
-	shcore               = syscall.NewLazyDLL("shcore.dll")
-	procGetDpiForMonitor = shcore.NewProc("GetDpiForMonitor")
+	procMonitorFromPoint         = user32.NewProc("MonitorFromPoint")
+	procGetMonitorInfoW          = user32.NewProc("GetMonitorInfoW")
+	procGetDpiForSystem          = user32.NewProc("GetDpiForSystem")
+	procAdjustWindowRectEx       = user32.NewProc("AdjustWindowRectEx")
+	procAdjustWindowRectExForDpi = user32.NewProc("AdjustWindowRectExForDpi")
+	shcore                       = syscall.NewLazyDLL("shcore.dll")
+	procGetDpiForMonitor         = shcore.NewProc("GetDpiForMonitor")
 )
 
 type monitorInfo struct {
@@ -473,8 +478,70 @@ func trayBrowserCandidates() (paths []string, edgeCount int) {
 	return
 }
 
-// openTrayPopupWindow opens the compact tray popup in a dedicated Chromium
-// profile, then forces its size and position in physical pixels.
+func closeTrayPopupHWND(hwnd uintptr) {
+	if hwnd != 0 && isWindow(hwnd) {
+		procPostMessageW.Call(hwnd, wmClose, 0, 0)
+	}
+	noteTrayPopupExited()
+}
+
+func noteTrayPopupExited() {
+	trayMu.Lock()
+	trayPopupLaunching = false
+	trayPopupClosedAt = time.Now()
+	trayMu.Unlock()
+}
+
+func noteTrayPopupLaunchFailed() {
+	trayMu.Lock()
+	trayPopupLaunching = false
+	trayMu.Unlock()
+}
+
+// trayPopupFrameSize is the extra outer size (physical pixels) of a
+// WS_POPUP|WS_BORDER tray window around its client area, at dpi.
+func trayPopupFrameSize(dpi int) (fw, fh int) {
+	if dpi < 96 {
+		dpi = 96
+	}
+	const sample = 100
+	var rc winRect
+	rc.right = sample
+	rc.bottom = sample
+	style := uintptr(wsPopup | wsBorder)
+	ex := uintptr(wsExToolWindow | wsExTopmost)
+	ok := false
+	if procAdjustWindowRectExForDpi.Find() == nil {
+		r, _, _ := procAdjustWindowRectExForDpi.Call(uintptr(unsafe.Pointer(&rc)), style, 0, ex, uintptr(dpi))
+		ok = r != 0
+	}
+	if !ok {
+		r, _, _ := procAdjustWindowRectEx.Call(uintptr(unsafe.Pointer(&rc)), style, 0, ex)
+		ok = r != 0
+	}
+	if ok {
+		fw = int(rc.right-rc.left) - sample
+		fh = int(rc.bottom-rc.top) - sample
+	}
+	if fw < 0 {
+		fw = 0
+	}
+	if fh < 0 {
+		fh = 0
+	}
+	if fw == 0 && fh == 0 {
+		b := dipToPhysical(1, dpi)
+		if b < 1 {
+			b = 1
+		}
+		return 2 * b, 2 * b
+	}
+	return
+}
+
+// openTrayPopupWindow toggles the compact tray popup. A second click (or a
+// click that just closed it by deactivating it) will not start another one.
+// In WebView2 mode the window's client area is 260x248 DIP at the monitor DPI.
 func openTrayPopupWindow(u string, w, h int) {
 	if w < 1 {
 		w = trayPopupWidth
@@ -482,16 +549,35 @@ func openTrayPopupWindow(u string, w, h int) {
 	if h < 1 {
 		h = trayPopupHeight
 	}
+	hwnd := existingTrayPopupHWND()
+	trayMu.Lock()
+	act := decideTrayPopupClick(hwnd != 0, trayPopupLaunching, time.Now(), trayPopupClosedAt)
+	if act == trayClickOpen {
+		trayPopupLaunching = true
+	}
+	trayMu.Unlock()
+	switch act {
+	case trayClickClose:
+		closeTrayPopupHWND(hwnd)
+		return
+	case trayClickIgnore:
+		return
+	}
+
 	pt := cursorPoint()
 	work := workAreaAt(pt.x, pt.y)
 	dpi := dpiAt(pt.x, pt.y)
-	x, y, pw, ph := trayPopupRect(int(pt.x), int(pt.y), int(work.left), int(work.top), int(work.right), int(work.bottom), w, h, dpi)
-	if hwnd := existingTrayPopupHWND(); hwnd != 0 {
-		setWindowPosRect(hwnd, x, y, pw, ph)
-		activateWindow(hwnd)
-		return
+	var x, y, pw, ph int
+	useWebView := webview2Ready()
+	if useWebView {
+		cw, ch := dipToPhysical(w, dpi), dipToPhysical(h, dpi)
+		fw, fh := trayPopupFrameSize(dpi)
+		pw, ph = trayPopupOuterFromClient(cw, ch, fw, fh)
+		x, y = trayPopupPlace(int(pt.x), int(pt.y), int(work.left), int(work.top), int(work.right), int(work.bottom), pw, ph, dpi)
+	} else {
+		x, y, pw, ph = trayPopupRect(int(pt.x), int(pt.y), int(work.left), int(work.top), int(work.right), int(work.bottom), w, h, dpi)
 	}
-	if webview2Ready() {
+	if useWebView {
 		r := windowRect{x, y, pw, ph}
 		_ = launchWindowHost(u, windowKindTray, r, func() error {
 			openTrayPopupEdge(u, w, h, x, y, pw, ph, dpi)
@@ -500,6 +586,7 @@ func openTrayPopupWindow(u string, w, h int) {
 		return
 	}
 	noteWebView2Missing()
+	noteTrayPopupLaunchFailed()
 	openTrayPopupEdge(u, w, h, x, y, pw, ph, dpi)
 }
 
