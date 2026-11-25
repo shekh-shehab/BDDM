@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Download progress</title>
+<link rel="icon" type="image/png" sizes="32x32" href="icon-32.png">
+<link rel="icon" type="image/png" sizes="128x128" href="icon.png">
+<link rel="stylesheet" href="theme.css">
+<style>
+  html, body { margin: 0; height: 100%; }
+  body { display: flex; align-items: stretch; }
+  .window { flex: 1; padding: 22px 22px 18px; text-align: center; background: var(--surface); }
+  .name { font-size: 14px; font-weight: 600; margin: 0 0 4px; word-break: break-word; }
+  .actions-row { justify-content: center; margin-top: 16px; }
+</style>
+</head>
+<body>
+<div class="window">
+  <p class="name" id="name">Starting…</p>
+  <p class="meta" id="meta">—</p>
+  <div class="ring" id="ring" style="--p:0"><span class="c"><b id="pct">0%</b><span class="meta" id="spd">—</span></span></div>
+  <p class="meta" id="eta">—</p>
+  <div class="actions-row">
+    <button type="button" class="pill" id="hide">Hide</button>
+    <button type="button" class="pill" id="cancel">Cancel</button>
+    <button type="button" class="pill prim" id="pause">Pause</button>
+  </div>
+  <p class="hint" id="err" style="color:var(--text-danger);margin-top:8px"></p>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const id = new URLSearchParams(location.search).get("id") || "";
+const scheme = new URLSearchParams(location.search).get("scheme");
+if (scheme === "dark" || scheme === "light") document.documentElement.dataset.scheme = scheme;
+
+async function api(path, body) {
+  const opt = body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
+  const r = await fetch(path, opt);
+  let data = {};
+  try { data = await r.json(); } catch (e) {}
+  if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
+  return data;
+}
+function fmtSize(n) {
+  if (!n || n <= 0) return "?";
+  const u = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return n.toFixed(i === 0 ? 0 : 1) + " " + u[i];
+}
+function fmtSpeed(b) { return b > 0 ? fmtSize(b) + "/s" : "—"; }
+function fmtETA(s) {
+  if (s < 0 || s == null) return "Calculating time left…";
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  if (h) return h + " h " + m + " min left";
+  if (m) return m + " min " + sec + " sec left";
+  return sec + " sec left";
+}
+let closed = false;
+async function tick() {
+  if (closed || !id) return;
+  let j;
+  try { j = await api("/api/jobs/" + encodeURIComponent(id)); } catch (e) { $("err").textContent = e.message; return; }
+  $("name").textContent = j.name || "Download";
+  const known = j.size > 0;
+  const pct = known ? Math.min(100, (j.done * 100) / j.size) : (j.status === "Done" ? 100 : 0);
+  $("meta").textContent = (known ? fmtSize(j.size) : (j.done > 0 ? fmtSize(j.done) : "Size unknown")) + (j.kind === "video" ? ", Video" : "");
+  $("pct").textContent = known || j.status === "Done" ? Math.round(pct) + "%" : "…";
+  $("ring").style.setProperty("--p", pct.toFixed(1));
+  $("ring").classList.toggle("done", j.status === "Done");
+  $("ring").classList.toggle("err", j.status === "Error");
+  const active = j.status === "Downloading";
+  $("spd").textContent = active ? fmtSpeed(j.speed) : (j.status || "");
+  $("eta").textContent = active ? fmtETA(j.eta) : (j.status === "Done" ? "Finished" : (j.status === "Paused" ? "Paused" : (j.status === "Error" ? (j.reason || j.error || "Failed") : j.status || "")));
+  $("pause").textContent = (j.status === "Paused" || j.status === "Error") ? "Resume" : "Pause";
+  $("pause").disabled = j.status === "Done";
+  $("cancel").disabled = j.status === "Done";
+  if (j.status === "Done") {
+    closed = true;
+    setTimeout(() => window.close(), 200);
+  }
+}
+$("hide").onclick = () => { closed = true; window.close(); };
+$("pause").onclick = async () => {
+  $("err").textContent = "";
+  try {
+    const j = await api("/api/jobs/" + encodeURIComponent(id));
+    if (j.status === "Paused" || j.status === "Error") await api("/api/jobs/" + encodeURIComponent(id) + "/resume", {});
+    else await api("/api/jobs/" + encodeURIComponent(id) + "/pause", {});
+    tick();
+  } catch (e) { $("err").textContent = e.message; }
+};
+$("cancel").onclick = async () => {
+  try { await api("/api/jobs/" + encodeURIComponent(id) + "/pause", {}); } catch (e) {}
+  closed = true;
+  window.close();
+};
+setInterval(tick, 400);
+tick();
+</script>
+</body>
+</html>

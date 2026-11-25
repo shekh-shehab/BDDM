@@ -152,6 +152,14 @@ func openFolder(dir, file string) error {
 	return nil
 }
 
+// openFile opens a file with the default app.
+func openFile(path string) error {
+	if path == "" {
+		return errors.New("file not found")
+	}
+	return exec.Command("rundll32", "url.dll,FileProtocolHandler", path).Start()
+}
+
 // pickFolder shows the Windows folder dialog, owned by the BDDM window so
 // it appears in front. Returns "" if cancelled.
 func pickFolder(start string) (string, error) {

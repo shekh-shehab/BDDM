@@ -202,3 +202,147 @@ func TestMainWindowRedesignRenders(t *testing.T) {
 	chromeShot(t, chrome, base+"/?scheme=dark", filepath.Join(dir, "25-main-dark.png"), 1100, 720)
 	chromeShot(t, chrome, base+"/?tab=settings&scheme=light", filepath.Join(dir, "25-settings-light.png"), 1100, 900)
 }
+
+func TestConfirmProgressCompletePages(t *testing.T) {
+	confirm := readUI(t, "confirm.html")
+	for _, want := range []string{
+		`href="theme.css"`, `href="icon-32.png"`, `href="icon.png"`,
+		`id="name"`, `id="dir"`, `id="size"`, `id="url"`, `id="browse"`,
+		`id="start"`, `id="later"`, `id="cancel"`, `id="hash"`, `id="mirrors"`,
+		`id="fmt"`, `id="dup"`, "Download Later", "Start Download",
+		`dataset.scheme`,
+	} {
+		if !strings.Contains(confirm, want) {
+			t.Errorf("ui/confirm.html missing %q", want)
+		}
+	}
+	assertEnglishUI(t, "ui/confirm.html", confirm)
+
+	progress := readUI(t, "progress.html")
+	for _, want := range []string{
+		`href="theme.css"`, `href="icon-32.png"`, `id="name"`, `id="pct"`,
+		`id="spd"`, `id="eta"`, `id="pause"`, `id="cancel"`, `id="hide"`,
+		`class="ring"`, "Download progress", "/api/jobs/",
+	} {
+		if !strings.Contains(progress, want) {
+			t.Errorf("ui/progress.html missing %q", want)
+		}
+	}
+	assertEnglishUI(t, "ui/progress.html", progress)
+
+	complete := readUI(t, "complete.html")
+	for _, want := range []string{
+		`href="theme.css"`, `href="icon-32.png"`, `id="name"`, `id="open"`,
+		`id="folder"`, `id="close"`, "Download complete", "Open folder",
+		"/openfile",
+	} {
+		if !strings.Contains(complete, want) {
+			t.Errorf("ui/complete.html missing %q", want)
+		}
+	}
+	assertEnglishUI(t, "ui/complete.html", complete)
+}
+
+func TestProgressPopupNotForFolderOrBurst(t *testing.T) {
+	_ = takePopupLog()
+	m, _ := newTestManager(t, 4)
+	if popupEligible(JobView{ID: "a", Group: "g1"}) {
+		t.Fatal("folder files must not get a compact progress window")
+	}
+	if popupEligible(JobView{ID: "t", Kind: kindTorrent}) {
+		t.Fatal("torrents keep their own window")
+	}
+	if !popupEligible(JobView{ID: "f", Name: "a.bin"}) {
+		t.Fatal("a single file should be eligible")
+	}
+	s := &server{m: m, port: "9"}
+	for i := 1; i <= 5; i++ {
+		s.offerProgress(JobView{ID: "j" + strconv.Itoa(i)}, false)
+	}
+	log := takePopupLog()
+	if len(log) != popupBurstMax {
+		t.Fatalf("burst should cap compact windows at %d, got %v", popupBurstMax, log)
+	}
+	s.offerProgress(JobView{ID: "later"}, true)
+	if got := takePopupLog(); len(got) != 0 {
+		t.Fatalf("Download Later should not open progress: %v", got)
+	}
+}
+
+func TestGetJobAndCompletePopup(t *testing.T) {
+	_ = takePopupLog()
+	m, dl := newTestManager(t, 4)
+	now := time.Now()
+	j := &Job{ID: "done1", URL: "https://example.com/a.bin", Name: "a.bin", Status: StatusDone, Size: 1024, Dir: dl, Started: now.Add(-3 * time.Minute), Finished: now}
+	j.done.Store(1024)
+	m.mu.Lock()
+	m.jobs = append([]*Job{j}, m.jobs...)
+	m.mu.Unlock()
+
+	hs := startUITestServer(t, m)
+	res, err := http.Get(hs + "/api/jobs/done1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatalf("GET /api/jobs/done1: %s", res.Status)
+	}
+
+	m.mu.Lock()
+	m.markPopupLocked("done1")
+	m.offerCompleteLocked(j)
+	m.mu.Unlock()
+	time.Sleep(50 * time.Millisecond)
+	log := takePopupLog()
+	if len(log) != 1 || log[0] != "complete:done1" {
+		t.Fatalf("wanted complete:done1, got %v", log)
+	}
+
+	// A second complete must not fire without a fresh mark.
+	m.mu.Lock()
+	m.offerCompleteLocked(j)
+	m.mu.Unlock()
+	time.Sleep(20 * time.Millisecond)
+	if got := takePopupLog(); len(got) != 0 {
+		t.Fatalf("complete window must not repeat: %v", got)
+	}
+}
+
+func TestConfirmProgressCompleteRenders(t *testing.T) {
+	chrome := findChrome()
+	if chrome == "" {
+		t.Skip("no chrome for a screenshot")
+	}
+	m, dl := newTestManager(t, 4)
+	now := time.Now()
+	pend, err := m.AddPending(AddRequest{URL: "https://example.com/film.mp4", Filename: "episode_01.mp4"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	down := &Job{
+		ID: "prog1", URL: "https://example.com/film.mp4", Name: "episode_01.mp4",
+		Kind: "video", Status: StatusDownloading, Size: 420 * 1024 * 1024, Dir: dl, Started: now.Add(-40 * time.Second),
+	}
+	down.done.Store(int64(68 * 420 * 1024 * 1024 / 100))
+	down.liveMu.Lock()
+	down.speed = 2.4 * 1024 * 1024
+	down.liveMu.Unlock()
+	done := &Job{
+		ID: "comp1", URL: "https://example.com/film.mp4", Name: "episode_01.mp4",
+		Kind: "video", Status: StatusDone, Size: 420 * 1024 * 1024, Dir: dl,
+		Started: now.Add(-3 * time.Minute), Finished: now.Add(-8 * time.Second),
+	}
+	done.done.Store(done.Size)
+	m.mu.Lock()
+	m.jobs = append([]*Job{down, done}, m.jobs...)
+	m.mu.Unlock()
+	base := startUITestServer(t, m)
+	dir := "ui-shots"
+	chromeShot(t, chrome, base+"/confirm.html?id="+pend.ID+"&scheme=light", filepath.Join(dir, "26-confirm-light.png"), 600, 520)
+	chromeShot(t, chrome, base+"/confirm.html?id="+pend.ID+"&scheme=dark", filepath.Join(dir, "26-confirm-dark.png"), 600, 520)
+	chromeShot(t, chrome, base+"/progress.html?id=prog1&scheme=light", filepath.Join(dir, "26-progress-light.png"), 380, 400)
+	chromeShot(t, chrome, base+"/progress.html?id=prog1&scheme=dark", filepath.Join(dir, "26-progress-dark.png"), 380, 400)
+	chromeShot(t, chrome, base+"/complete.html?id=comp1&scheme=light", filepath.Join(dir, "26-complete-light.png"), 380, 240)
+	chromeShot(t, chrome, base+"/complete.html?id=comp1&scheme=dark", filepath.Join(dir, "26-complete-dark.png"), 380, 240)
+}

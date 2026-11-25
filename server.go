@@ -32,6 +32,7 @@ type server struct {
 
 func newServer(m *Manager, port string, quit func(), upd *Updater) http.Handler {
 	s := &server{m: m, quit: quit, port: port, upd: upd}
+	m.uiPort = port
 	mux := http.NewServeMux()
 
 	ui, _ := fs.Sub(uiFiles, "ui")
@@ -199,6 +200,9 @@ func newServer(m *Manager, port string, quit func(), upd *Updater) http.Handler 
 			reply(w, err)
 			return
 		}
+		if !body.Playlist {
+			s.offerProgress(job, body.Later)
+		}
 		writeJSON(w, 200, map[string]any{"ok": true, "job": job})
 	})
 	mux.HandleFunc("POST /api/video/{id}/retry", func(w http.ResponseWriter, r *http.Request) {
@@ -241,6 +245,7 @@ func newServer(m *Manager, port string, quit func(), upd *Updater) http.Handler 
 			reply(w, err)
 			return
 		}
+		s.offerProgress(job, body.Later)
 		writeJSON(w, 200, map[string]any{"ok": true, "job": job})
 	})
 	mux.HandleFunc("GET /api/drive/{id}", func(w http.ResponseWriter, r *http.Request) {
@@ -309,6 +314,25 @@ func newServer(m *Manager, port string, quit func(), upd *Updater) http.Handler 
 			return
 		}
 		writeJSON(w, 200, v)
+	})
+	mux.HandleFunc("GET /api/jobs/{id}", func(w http.ResponseWriter, r *http.Request) {
+		v, err := m.View(r.PathValue("id"))
+		if err != nil {
+			writeJSON(w, 404, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+		writeJSON(w, 200, v)
+	})
+	mux.HandleFunc("POST /api/jobs/{id}/openfile", func(w http.ResponseWriter, r *http.Request) {
+		_, file, err := m.FilePath(r.PathValue("id"))
+		if err == nil {
+			if file == "" {
+				err = errors.New("the file is not available yet")
+			} else {
+				err = openFile(file)
+			}
+		}
+		reply(w, err)
 	})
 	mux.HandleFunc("POST /api/jobs/{id}/open", func(w http.ResponseWriter, r *http.Request) {
 		dir, file, err := m.FilePath(r.PathValue("id"))
@@ -574,6 +598,7 @@ func (s *server) handleCaptured(w http.ResponseWriter, r *http.Request) {
 		log.Printf("could not open the confirm window: %v; starting the download", err)
 		if started, err := s.m.StartPending(job.ID, "", "", false, ""); err == nil {
 			job = started
+			s.offerProgress(job, false)
 		}
 		writeJSON(w, 200, map[string]any{"ok": true, "job": job})
 		return
@@ -638,6 +663,7 @@ func (s *server) addPendingWindow(w http.ResponseWriter, req AddRequest) {
 		log.Printf("could not open the confirm window: %v; starting the download", err)
 		if started, err := s.m.StartPending(job.ID, "", "", false, ""); err == nil {
 			job = started
+			s.offerProgress(job, false)
 		}
 		writeJSON(w, 200, map[string]any{"ok": true, "job": job})
 		return
@@ -657,6 +683,7 @@ func (s *server) addFile(w http.ResponseWriter, req AddRequest) {
 		writeJSON(w, 400, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
+	s.offerProgress(job, false)
 	writeJSON(w, 200, map[string]any{"ok": true, "job": job})
 }
 

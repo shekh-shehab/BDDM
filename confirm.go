@@ -267,6 +267,17 @@ func (m *Manager) CancelPending(id string) error {
 	return nil
 }
 
+// View returns one job, pending ones included.
+func (m *Manager) View(id string) (JobView, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	j := m.findLocked(id)
+	if j == nil {
+		return JobView{}, errors.New("download not found")
+	}
+	return j.viewLocked(), nil
+}
+
 // Views returns the jobs with these ids, pending ones included.
 func (m *Manager) Views(ids map[string]bool) []JobView {
 	m.mu.Lock()

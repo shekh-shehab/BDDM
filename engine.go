@@ -492,6 +492,11 @@ type Manager struct {
 	torUpShare   *tokenBucket
 	torPacing    bool
 
+	// Compact progress/complete windows (popupwin.go).
+	uiPort     string
+	popupIDs   map[string]bool
+	popupBurst []time.Time
+
 	// Auto-yield (yield.go): slow down when other apps use the network.
 	yieldEng       *yieldEngine
 	yieldDown      *tokenBucket
@@ -1183,6 +1188,7 @@ func (m *Manager) startLocked(j *Job) {
 				kind = "bad"
 			}
 			m.announceLocked(title, body, kind)
+			m.offerCompleteLocked(j)
 		}
 		m.scheduleLocked()
 		m.saveHistoryLocked()

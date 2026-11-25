@@ -173,3 +173,49 @@ input[type=range] { accent-color: var(--accent); }
 .toast.bad { border-left-color: var(--danger); }
 .compact-win { width: 100%; min-height: 100vh; display: flex; align-items: stretch; justify-content: stretch; background: var(--page); }
 .compact-win .window { flex: 1; margin: 0; border-radius: 0; border: 0; background: var(--surface); padding: 18px 20px 16px; display: flex; flex-direction: column; gap: 12px; }
+
+/* Compact dialog windows (confirm, progress, complete, error) */
+.compact-win header.slim {
+  display: flex; align-items: center; gap: 10px;
+  padding: 0 0 12px; font-weight: 600; font-size: 15px; border-bottom: 1px solid var(--border);
+  margin-bottom: 14px;
+}
+.compact-win header.slim img { width: 24px; height: 24px; border-radius: 8px; display: block; }
+.compact-win .field { margin-bottom: 12px; }
+.compact-win .field label, .compact-win .field .lbl {
+  display: block; font-size: 12px; font-weight: 600; color: var(--text2); margin-bottom: 5px;
+}
+.compact-win input[type=text], .compact-win select, .compact-win textarea {
+  flex: 1; width: 100%; font: inherit; color: var(--text); background: var(--neutral);
+  border: 1px solid var(--border); border-radius: 12px; padding: 8px 12px; outline: none;
+}
+.compact-win input:focus, .compact-win select:focus, .compact-win textarea:focus { border-color: var(--accent); }
+.compact-win .value {
+  background: var(--neutral); border: 1px solid var(--border); border-radius: 12px;
+  padding: 8px 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.compact-win .line { display: flex; gap: 8px; align-items: center; }
+.compact-win footer.bar, .actions-row {
+  display: flex; gap: 8px; align-items: center; justify-content: flex-end; padding-top: 8px;
+}
+.compact-win footer.bar .spacer { flex: 1; }
+.ring {
+  --p: 0;
+  width: 150px; height: 150px; border-radius: 50%;
+  background: conic-gradient(var(--accent) calc(var(--p) * 1%), var(--neutral) 0);
+  display: flex; align-items: center; justify-content: center;
+  margin: 0 auto 8px; position: relative;
+}
+.ring::before {
+  content: ""; position: absolute; inset: 12px; border-radius: 50%; background: var(--surface);
+}
+.ring .c { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; }
+.ring .c b { font-size: 30px; font-weight: 600; line-height: 1.1; }
+.ring.done { background: conic-gradient(var(--success) 100%, var(--neutral) 0); }
+.ring.err { background: conic-gradient(var(--danger) calc(var(--p) * 1%), var(--neutral) 0); }
+.warnbox {
+  display: none; gap: 10px; align-items: flex-start;
+  background: var(--badge-pause-bg); border: 1px solid var(--badge-pause-bd);
+  color: var(--badge-pause-fg); border-radius: 12px; padding: 10px 12px; margin-bottom: 12px; font-size: 13px;
+}
+.warnbox.show { display: flex; }

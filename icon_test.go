@@ -80,7 +80,7 @@ func TestWindowsIconContainsExpectedSizes(t *testing.T) {
 
 func TestUIUsesNewIcons(t *testing.T) {
 	pages := []string{
-		"ui/index.html", "ui/confirm.html", "ui/drive.html", "ui/torrent.html", "ui/video.html",
+		"ui/index.html", "ui/confirm.html", "ui/drive.html", "ui/torrent.html", "ui/video.html", "ui/progress.html", "ui/complete.html",
 	}
 	for _, p := range pages {
 		b, err := os.ReadFile(p)

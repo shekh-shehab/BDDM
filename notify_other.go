@@ -60,6 +60,16 @@ func openURL(raw string) error {
 }
 
 // openFolder opens dir in the file manager (file is selected on Windows only).
+func openFile(path string) error {
+	if path == "" {
+		return errors.New("file not found")
+	}
+	if runtime.GOOS == "darwin" {
+		return exec.Command("open", path).Start()
+	}
+	return exec.Command("xdg-open", path).Start()
+}
+
 func openFolder(dir, file string) error {
 	opener := "xdg-open"
 	if runtime.GOOS == "darwin" {
