@@ -592,3 +592,21 @@ func readFileIfPresent(t *testing.T, name string) string {
 	}
 	return string(b)
 }
+
+func TestTrayTooltipFormat(t *testing.T) {
+	if got := formatTrayTip(traySnapshot{}); got != "BDDM" {
+		t.Fatalf("idle tip: %q", got)
+	}
+	st := traySnapshot{Active: 1, Speed: 2.4 * 1024 * 1024, Pct: 68}
+	if got := formatTrayTip(st); got != "BDDM — 2.4 MB/s, 68%" {
+		t.Fatalf("tip: %q", got)
+	}
+	st.Pct = -1
+	if got := formatTrayTip(st); got != "BDDM — 2.4 MB/s" {
+		t.Fatalf("tip without percent: %q", got)
+	}
+	src := readFileIfPresent(t, "tray_windows.go")
+	if src != "" && !strings.Contains(src, "trayTipLoop") {
+		t.Error("Windows tray should update the tooltip while downloads run")
+	}
+}

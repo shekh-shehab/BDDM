@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"sync"
 	"syscall"
+	"time"
 	"unsafe"
 )
 
@@ -82,6 +83,7 @@ var (
 	trayMgr     *Manager
 	trayWndProc = syscall.NewCallback(trayWindowProc)
 	trayClass   = mustUTF16("BDDMTrayHidden")
+	trayTipStop chan struct{}
 )
 
 type notifyIconData struct {
@@ -176,12 +178,46 @@ func startTray(port string, quit func(), m *Manager) {
 			log.Printf("tray icon: %v", err)
 		}
 	}()
+	go trayTipLoop(m)
+}
+
+func trayTipLoop(m *Manager) {
+	if m == nil {
+		return
+	}
+	stop := make(chan struct{})
+	trayMu.Lock()
+	if trayTipStop != nil {
+		close(trayTipStop)
+	}
+	trayTipStop = stop
+	trayMu.Unlock()
+	tick := time.NewTicker(500 * time.Millisecond)
+	defer tick.Stop()
+	last := ""
+	for {
+		select {
+		case <-stop:
+			return
+		case <-tick.C:
+			tip := formatTrayTip(snapshotTray(m.List()))
+			if tip != last {
+				setTrayTip(tip)
+				last = tip
+			}
+		}
+	}
 }
 
 func stopTray() {
 	trayMu.Lock()
 	hwnd := trayHwnd
+	stop := trayTipStop
+	trayTipStop = nil
 	trayMu.Unlock()
+	if stop != nil {
+		close(stop)
+	}
 	if hwnd != 0 {
 		procPostMessageW.Call(hwnd, wmDestroy, 0, 0)
 	}
