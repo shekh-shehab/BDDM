@@ -81,8 +81,6 @@ func TestHLSCaptureWiredAndExistingFlowsUnchanged(t *testing.T) {
 	vs := string(vj)
 	for _, want := range []string{
 		"shouldFilterDisguisedPlaylist",
-		"shouldAutoOfferStream",
-		"maybeAutoOffer",
 		"filterResponseData",
 		`if (typeof IS_FIREFOX !== "undefined" && IS_FIREFOX && api.webRequest.filterResponseData)`,
 		`["blocking", "responseHeaders"]`,
@@ -92,9 +90,11 @@ func TestHLSCaptureWiredAndExistingFlowsUnchanged(t *testing.T) {
 			t.Errorf("videos.js missing %q", want)
 		}
 	}
-	// Auto-popup is skipped for YouTube/Facebook (existing flows unchanged).
-	if !strings.Contains(vs, "YouTube, Facebook") && !strings.Contains(vs, "shouldAutoOfferStream") {
-		t.Error("videos.js should mention the YouTube/Facebook auto-offer skip")
+	// Item 77: a caught stream never opens a BDDM window by itself.
+	for _, gone := range []string{"maybeAutoOffer", "shouldAutoOfferStream", "autoOfferKey", "offeredStreams"} {
+		if strings.Contains(vs, gone) {
+			t.Errorf("videos.js still has the item-70 auto-popup (%q)", gone)
+		}
 	}
 
 	cj, err := os.ReadFile(filepath.Join("extension", "content.js"))

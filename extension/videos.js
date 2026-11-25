@@ -124,7 +124,6 @@ const ownPeeks = new Map(); // url -> {at, result}
 const PEEK_TTL = 60000;
 const pendingBodies = new Map(); // requestId -> {promise, resolve}
 const capturedBodies = new Map(); // url -> {at, result}
-const offeredStreams = new Set(); // autoOfferKey values
 
 function ownPeek(url) {
   const p = ownPeeks.get(url);
@@ -336,33 +335,17 @@ async function onMediaResponse(details) {
     const v = { url: details.url, kind, master: !r.variant, title: tab.title || "",
       label: streamLabel(details.url, kind) + (r.encrypted ? " (encrypted)" : ""), encrypted: !!r.encrypted,
       frame: frameOf(details, tab.url) };
-    if (addVideo(details.tabId, tab.url, v)) maybeAutoOffer(tab, v);
+    addVideo(details.tabId, tab.url, v);
     return;
   }
   const v = { url: details.url, kind, title: tab.title || "", label: streamLabel(details.url, kind),
     frame: frameOf(details, tab.url) };
-  if (addVideo(details.tabId, tab.url, v)) maybeAutoOffer(tab, v);
+  addVideo(details.tabId, tab.url, v);
 }
 
-async function maybeAutoOffer(tab, v) {
-  // YouTube, Facebook and other sites with their own flow are skipped
-  // inside shouldAutoOfferStream; only disguised/HLS (and DASH) on other
-  // sites are offered, once per page+stream.
-  if (!tab || !shouldAutoOfferStream(tab.url, v)) return;
-  const key = autoOfferKey(tab.url, v.url);
-  if (offeredStreams.has(key)) return;
-  offeredStreams.add(key);
-  while (offeredStreams.size > 200) offeredStreams.delete(offeredStreams.keys().next().value);
-  const res = await sendVideo(v.url, tab, tab.title);
-  if (res.kind === "ok" || res.kind === "window" || res.kind === "duplicate") {
-    notify("Sent to BDDM", "Choose the quality in the BDDM window.");
-  } else if (res.kind === "offline") {
-    notify("BDDM is not running", "Start BDDM first, then try again.");
-  } else {
-    offeredStreams.delete(key);
-    notify("BDDM could not add this video", res.error || "");
-  }
-}
+// Item 77: a caught stream is never sent to BDDM by itself (the item-70
+// auto-popup is gone). It is listed in the toolbar popup (badge count) and
+// offered by the corner "Download with BDDM" button; the user decides.
 
 if (api.webRequest && api.webRequest.onHeadersReceived) {
   api.webRequest.onHeadersReceived.addListener(

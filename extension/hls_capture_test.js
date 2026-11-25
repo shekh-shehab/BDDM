@@ -111,47 +111,9 @@ eq("network fail after 200 tab keeps", t.peekConfirmAction(d(), { ok: false, sta
 eq("real jpeg body after 200 drops", t.peekConfirmAction(d(), { ok: true, status: 200, text: "\xff\xd8\xff not a playlist" }), "drop");
 eq("forbidden-only (tab also 403) drops", t.peekConfirmAction(d({ statusCode: 403 }), { ok: false, status: 403, text: "#EXTM3U\n#EXT-X-ERROR:forbidden\n" }), "drop");
 
-// --- auto-popup: NEVER on YouTube / Facebook / existing video-page flows;
-// only for detected disguised/HLS (or DASH) on other sites, once per stream.
-const hls = { kind: "hls", url: "https://watch.movielink.tv/m/token123" };
-const dash = { kind: "dash", url: "https://cdn.other.example/manifest.mpd" };
-const file = { kind: "file", url: "https://cdn.other.example/movie.mp4" };
-const page = { kind: "page", url: "https://www.youtube.com/watch?v=abc" };
-
-eq("auto-offer movielink HLS", t.shouldAutoOfferStream("https://qmr7cm.movielinkbd.at/download18plus/x", hls), true);
-eq("auto-offer other-site DASH", t.shouldAutoOfferStream("https://example.com/watch/1", dash), true);
-eq("NO auto-offer on YouTube watch", t.shouldAutoOfferStream("https://www.youtube.com/watch?v=dQw4w9wgWcQ", hls), false);
-eq("NO auto-offer on YouTube shorts", t.shouldAutoOfferStream("https://www.youtube.com/shorts/xxxxxxx", hls), false);
-eq("NO auto-offer on youtu.be", t.shouldAutoOfferStream("https://youtu.be/dQw4w9wgWcQ", hls), false);
-eq("NO auto-offer on Facebook watch", t.shouldAutoOfferStream("https://www.facebook.com/watch?v=1", hls), false);
-eq("NO auto-offer on Facebook videos path", t.shouldAutoOfferStream("https://www.facebook.com/someone/videos/123", hls), false);
-eq("NO auto-offer on Instagram reel", t.shouldAutoOfferStream("https://www.instagram.com/reel/abc/", hls), false);
-eq("NO auto-offer on TikTok", t.shouldAutoOfferStream("https://www.tiktok.com/@u/video/123", hls), false);
-eq("NO auto-offer on X status", t.shouldAutoOfferStream("https://x.com/u/status/1234567890", hls), false);
-eq("NO auto-offer for file kind", t.shouldAutoOfferStream("https://example.com/a", file), false);
-eq("NO auto-offer for page kind", t.shouldAutoOfferStream("https://www.youtube.com/watch?v=abc", page), false);
-eq("NO auto-offer for embed kind", t.shouldAutoOfferStream("https://example.com/blog", { kind: "embed", url: "https://www.youtube.com/embed/abc" }), false);
-
-const k1 = t.autoOfferKey("https://qmr7cm.movielinkbd.at/page#frag", "https://watch.movielink.tv/m/token123");
-const k2 = t.autoOfferKey("https://qmr7cm.movielinkbd.at/page", "https://watch.movielink.tv/m/other");
-const k3 = t.autoOfferKey("https://qmr7cm.movielinkbd.at/other", "https://watch.movielink.tv/m/token123");
-eq("same page+folder is one offer (master vs sibling)", k1 === k2, true);
-eq("different page is a different offer", k1 === k3, false);
-
-// De-dup: offering the same stream twice is skipped; a second stream on
-// another page is not.
-const offered = new Set();
-function offerOnce(tab, v) {
-  if (!t.shouldAutoOfferStream(tab, v)) return false;
-  const key = t.autoOfferKey(tab, v.url);
-  if (offered.has(key)) return false;
-  offered.add(key);
-  return true;
-}
-eq("first auto-offer on movielink fires", offerOnce("https://site.example/watch", hls), true);
-eq("second auto-offer same stream is skipped", offerOnce("https://site.example/watch", hls), false);
-eq("YouTube still does not auto-offer after a real offer elsewhere", offerOnce("https://www.youtube.com/watch?v=abc", hls), false);
-eq("Facebook still does not auto-offer", offerOnce("https://www.facebook.com/watch?v=1", hls), false);
+// --- item 77: no auto-popup anywhere; the helpers are gone.
+eq("no shouldAutoOfferStream export", typeof t.shouldAutoOfferStream, "undefined");
+eq("no autoOfferKey export", typeof t.autoOfferKey, "undefined");
 
 // --- context menu: YouTube/Facebook stay on the page-URL path;
 // other sites send a detected stream.

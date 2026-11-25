@@ -72,7 +72,7 @@ func TestOverlayWiredAndAutoOfferUnchanged(t *testing.T) {
 		t.Fatal(err)
 	}
 	vs := string(vj)
-	for _, want := range []string{"handleOverlayDownload", "overlayClickTarget", "overlayDownload", "shouldAutoOfferStream"} {
+	for _, want := range []string{"handleOverlayDownload", "overlayClickTarget", "overlayDownload"} {
 		if !strings.Contains(vs, want) {
 			t.Errorf("videos.js missing %q", want)
 		}
@@ -89,7 +89,7 @@ func TestOverlayWiredAndAutoOfferUnchanged(t *testing.T) {
 	}
 	// The button must not create a new auto-popup path on YouTube/Facebook.
 	if strings.Contains(osrc, "maybeAutoOffer") {
-		t.Error("the overlay content script must not auto-offer (item 70 rule stays in videos.js)")
+		t.Error("the overlay content script must not auto-offer (item 77)")
 	}
 }
 

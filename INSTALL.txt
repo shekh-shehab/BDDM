@@ -109,6 +109,12 @@ Edge window with sync and sign-in turned off. The old Edge profile folders
 (chromium-app, chromium-tray, chromium-popup in %APPDATA%\BDDM) are
 removed automatically.
 
+Browser extension 1.5.4: a video stream caught on a site without its own
+video page (for example movielinkbd) no longer opens a BDDM window by
+itself. Use the "Download with BDDM" button in the corner of the video, or
+click the BDDM toolbar icon (its badge shows how many videos were found).
+After updating, click the reload button of BDDM on the extensions page.
+
 4. What was new in 1.5.3
 -----------------------
 The Download Video window, and the other small windows (Download File Info,

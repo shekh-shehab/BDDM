@@ -198,24 +198,6 @@
     return filter;
   }
 
-  // Auto-popup only for confirmed disguised/HLS (or DASH) streams on sites
-  // that do not already have their own video-page flow (YouTube, Facebook, …).
-  // Behavior on those sites is unchanged.
-  function shouldAutoOfferStream(tabUrl, v) {
-    if (!v || (v.kind !== "hls" && v.kind !== "dash")) return false;
-    if (videoPageInfo(tabUrl)) return false;
-    let host = "";
-    try { host = new URL(tabUrl).hostname.toLowerCase(); } catch (e) { host = ""; }
-    if (host && PAGE_ONLY_HOSTS.test(host)) return false;
-    return true;
-  }
-
-  // One auto-offer per page + stream folder (master and its media playlists
-  // share a folder, so they do not open two windows).
-  function autoOfferKey(tabUrl, streamUrl) {
-    return pageKey(tabUrl) + "\n" + (folderOf(streamUrl) || streamUrl || "");
-  }
-
   function contextMenuAction(pageUrl, detectedKind) {
     if (videoPageInfo(pageUrl)) return "page";
     if (detectedKind === "hls" || detectedKind === "dash" || detectedKind === "file") return "stream";
@@ -247,8 +229,6 @@
     shouldFilterDisguisedPlaylist,
     decodeChunks,
     attachPlaylistFilter,
-    shouldAutoOfferStream,
-    autoOfferKey,
     contextMenuAction,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;

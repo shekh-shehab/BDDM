@@ -127,11 +127,8 @@ r = hit({ tabUrl: "https://example.com/article", videoSrc: "blob:https://example
 eq("no useful url -> none", r.reason, "none");
 eq("no useful url empty", r.url, "");
 
-// Auto-popup rule from item 70 is unchanged: button sites still must not
-// auto-open the window on YouTube/Facebook.
-eq("auto-offer still false on YouTube", sites.shouldAutoOfferStream(ytWatch, { kind: "hls", url: master }), false);
-eq("auto-offer still false on Facebook", sites.shouldAutoOfferStream(fb, { kind: "hls", url: master }), false);
-eq("auto-offer still true on movielink", sites.shouldAutoOfferStream("https://qmr7cm.movielinkbd.at/x", { kind: "hls", url: master }), true);
+// Item 77: the item-70 auto-popup is removed; the button is the only offer.
+eq("no auto-offer helper", typeof sites.shouldAutoOfferStream, "undefined");
 
 eq("safe http thumb", t.safeThumbnail("https://i.ytimg.com/vi/x/hqdefault.jpg"), "https://i.ytimg.com/vi/x/hqdefault.jpg");
 eq("safe jpeg data", t.safeThumbnail("data:image/jpeg;base64,AAAA").startsWith("data:image/jpeg"), true);
