@@ -1352,6 +1352,10 @@ $("url").focus();
     const btn = document.querySelector('[data-tab="settings"]');
     if (btn) btn.click();
   }
+  if (q.has("add")) {
+    const u = $("url");
+    if (u) u.focus();
+  }
   const id = q.get("speedlimit");
   if (id) {
     const open = () => {

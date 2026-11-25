@@ -425,6 +425,10 @@ func newServer(m *Manager, port string, quit func(), upd *Updater) http.Handler 
 		}
 		writeJSON(w, 200, s.upd.Cancel())
 	})
+	mux.HandleFunc("POST /api/pauseall", func(w http.ResponseWriter, r *http.Request) {
+		m.PauseAll()
+		reply(w, nil)
+	})
 	mux.HandleFunc("POST /api/quit", func(w http.ResponseWriter, r *http.Request) {
 		reply(w, nil)
 		go s.quit()

@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BDDM tray</title>
+<link rel="icon" type="image/png" sizes="32x32" href="icon-32.png">
+<link rel="icon" type="image/png" sizes="128x128" href="icon.png">
+<link rel="stylesheet" href="theme.css">
+<style>
+  html, body { margin: 0; height: 100%; background: var(--page); }
+  .popup { height: 100%; background: var(--surface); padding: 10px; display: flex; flex-direction: column; gap: 2px; }
+  .head { display: flex; align-items: center; gap: 8px; padding: 4px 8px 8px; }
+  .head img { width: 24px; height: 24px; border-radius: 8px; }
+  .mi { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; border: 0; background: transparent; border-radius: 12px; padding: 8px 10px; font-size: 13px; color: var(--text); cursor: pointer; }
+  .mi:hover { background: var(--neutral); }
+  .mi.danger { color: var(--text-danger); }
+  .sep { height: 1px; background: var(--border); margin: 4px 8px; }
+</style>
+</head>
+<body>
+<div class="popup">
+  <div class="head">
+    <img src="icon-32.png" alt="">
+    <span class="meta" id="headline">BDDM</span>
+  </div>
+  <button type="button" class="mi" id="show">Show BDDM</button>
+  <button type="button" class="mi" id="add">Add URL</button>
+  <button type="button" class="mi" id="pause">Pause all</button>
+  <button type="button" class="mi" id="settings">Settings</button>
+  <div class="sep"></div>
+  <button type="button" class="mi danger" id="quit">Quit</button>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const q = new URLSearchParams(location.search);
+const scheme = q.get("scheme");
+if (scheme === "dark" || scheme === "light") document.documentElement.dataset.scheme = scheme;
+
+async function api(path, body) {
+  const opt = body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
+  const r = await fetch(path, opt);
+  let data = {};
+  try { data = await r.json(); } catch (e) {}
+  if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
+  return data;
+}
+function fmtSpeed(b) {
+  if (!b || b <= 0) return "0 B/s";
+  const u = ["B/s", "KB/s", "MB/s", "GB/s"];
+  let i = 0, n = b;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return (n >= 10 || i === 0 ? n.toFixed(0) : n.toFixed(1)) + " " + u[i];
+}
+async function refresh() {
+  try {
+    const r = await api("/api/list");
+    const jobs = r.jobs || [];
+    let active = 0, speed = 0;
+    for (const j of jobs) if (j.status === "Downloading") { active++; speed += (j.speed || 0); }
+    $("headline").textContent = active ? (active + " active, " + fmtSpeed(speed)) : "No active downloads";
+  } catch (e) {
+    $("headline").textContent = "BDDM";
+  }
+}
+function openPage(path) {
+  window.open(path, "_blank");
+  setTimeout(() => window.close(), 200);
+}
+$("show").onclick = () => openPage("/");
+$("add").onclick = () => openPage("/?add=1");
+$("settings").onclick = () => openPage("/?tab=settings");
+$("pause").onclick = async () => {
+  try { await api("/api/pauseall", {}); } catch (e) {}
+  refresh();
+};
+$("quit").onclick = async () => {
+  try { await api("/api/quit", {}); } catch (e) {}
+  window.close();
+};
+refresh();
+</script>
+</body>
+</html>

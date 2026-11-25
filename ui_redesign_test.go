@@ -460,3 +460,80 @@ func TestSettingsAndAboutRenders(t *testing.T) {
 	chromeShot(t, chrome, base+"/?tab=settings&scheme=light", filepath.Join(dir, "28-settings-light.png"), 1100, 1400)
 	chromeShot(t, chrome, base+"/?tab=settings&scheme=dark", filepath.Join(dir, "28-settings-dark.png"), 1100, 1400)
 }
+
+func TestTrayMenuAndPopup(t *testing.T) {
+	for _, want := range []string{trayMenuShow, trayMenuAddURL, trayMenuPauseAll, trayMenuSettings, trayMenuQuit} {
+		if want == "" {
+			t.Fatalf("empty tray label")
+		}
+	}
+	page := readUI(t, "tray.html")
+	for _, want := range []string{
+		`href="theme.css"`, `href="icon-32.png"`, `src="icon-32.png"`,
+		`id="show"`, `id="add"`, `id="pause"`, `id="settings"`, `id="quit"`,
+		trayMenuShow, trayMenuAddURL, trayMenuPauseAll, trayMenuSettings, trayMenuQuit,
+		"/api/pauseall", "/api/quit", "/?add=1", "/?tab=settings",
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("ui/tray.html missing %q", want)
+		}
+	}
+	assertEnglishUI(t, "ui/tray.html", page)
+	if !strings.Contains(readUI(t, "index.html"), `q.has("add")`) {
+		t.Error("main window should focus the URL box for /?add=1")
+	}
+
+	jobs := []JobView{
+		{Status: StatusDownloading, Speed: 2.4 * 1024 * 1024, Size: 100, Done: 68},
+		{Status: StatusDownloading, Speed: 0, Size: 100, Done: 68},
+	}
+	st := snapshotTray(jobs)
+	if st.Active != 2 || st.Pct != 68 {
+		t.Fatalf("snapshot: %+v", st)
+	}
+	if got := formatTrayHeadline(st); got != "2 active, 2.4 MB/s" {
+		t.Fatalf("headline: %q", got)
+	}
+	if got := snapshotTray(nil); formatTrayHeadline(got) != "No active downloads" {
+		t.Fatalf("idle headline: %q", formatTrayHeadline(got))
+	}
+}
+
+func TestPauseAllAPI(t *testing.T) {
+	m, dl := newTestManager(t, 4)
+	j := &Job{ID: "p1", URL: "https://example.com/a.bin", Name: "a.bin", Status: StatusDownloading, Dir: dl}
+	m.mu.Lock()
+	m.jobs = append([]*Job{j}, m.jobs...)
+	m.mu.Unlock()
+	base := startUITestServer(t, m)
+	res, err := http.Post(base+"/api/pauseall", "application/json", strings.NewReader("{}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatalf("pauseall: %s", res.Status)
+	}
+	if got := m.List()[0].Status; got != StatusPaused {
+		t.Fatalf("status after Pause all: %s", got)
+	}
+}
+
+func TestTrayPopupRenders(t *testing.T) {
+	chrome := findChrome()
+	if chrome == "" {
+		t.Skip("no chrome for a screenshot")
+	}
+	m, dl := newTestManager(t, 4)
+	j := &Job{ID: "t1", URL: "https://example.com/a.bin", Name: "a.bin", Status: StatusDownloading, Size: 100, Dir: dl}
+	j.done.Store(68)
+	j.liveMu.Lock()
+	j.speed = 2.4 * 1024 * 1024
+	j.liveMu.Unlock()
+	m.mu.Lock()
+	m.jobs = append([]*Job{j}, m.jobs...)
+	m.mu.Unlock()
+	base := startUITestServer(t, m)
+	chromeShot(t, chrome, base+"/tray.html?scheme=light", filepath.Join("ui-shots", "29-tray-light.png"), 240, 280)
+	chromeShot(t, chrome, base+"/tray.html?scheme=dark", filepath.Join("ui-shots", "29-tray-dark.png"), 240, 280)
+}

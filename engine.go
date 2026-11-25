@@ -843,6 +843,31 @@ func (m *Manager) Pause(id string) error {
 	return nil
 }
 
+// PauseAll pauses every active or waiting download, as if the user pressed
+// Pause on each one (they do not auto-resume).
+func (m *Manager) PauseAll() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, j := range m.jobs {
+		if j.Removed {
+			continue
+		}
+		switch j.Status {
+		case StatusDownloading, StatusSeeding:
+			j.stopReason = "pause"
+			if j.cancel != nil {
+				j.cancel()
+			}
+			j.Status = StatusPaused
+			j.Interrupted = false
+		case StatusQueued:
+			j.Status = StatusPaused
+			j.Interrupted = false
+		}
+	}
+	m.saveHistoryLocked()
+}
+
 // RunningCount is the number of downloads in progress (not queued or paused).
 func (m *Manager) RunningCount() int {
 	m.mu.Lock()

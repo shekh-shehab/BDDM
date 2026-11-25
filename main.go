@@ -102,6 +102,7 @@ func main() {
 	quit := func() {
 		once.Do(func() {
 			log.Print("Stopping: pausing downloads and saving...")
+			stopTray()
 			upd.Stop()
 			m.Shutdown()
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -148,6 +149,8 @@ func main() {
 			log.Printf("could not add %s: %v", u, err)
 		}
 	}
+
+	startTray(port, quit, m)
 
 	log.Print("BDDM is running at " + appURL)
 	log.Print("Data folder: " + configDir)
