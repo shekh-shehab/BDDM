@@ -6,6 +6,7 @@
 <title>BDDM - Download Manager</title>
 <link rel="icon" type="image/png" sizes="32x32" href="icon-32.png">
 <link rel="icon" type="image/png" sizes="128x128" href="icon.png">
+<link rel="stylesheet" href="theme.css">
 <style>
   :root {
     color-scheme: light;
@@ -81,7 +82,7 @@
     --group-line: #33405c; }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; }
-  body { background: var(--bg); color: var(--text); font: 14px/1.4 "Segoe UI", system-ui, -apple-system, sans-serif; display: flex; flex-direction: column; }
+  body { background: var(--page); color: var(--text); font: 13px/1.4 "Segoe UI", Inter, system-ui, sans-serif; height: 100%; }
   button { font: inherit; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
   button:hover { border-color: var(--hover-line); background: var(--hover-bg); }
   button:disabled { opacity: .45; cursor: default; }
@@ -93,7 +94,7 @@
   input[type=text], input[type=number], input[type=search] { font: inherit; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 9px 12px; outline: none; }
   input:focus { border-color: var(--accent); }
 
-  header { display: flex; align-items: center; gap: 18px; padding: 12px 20px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  .topbar-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
   .logo { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 17px; letter-spacing: .5px; }
   .logo img { width: 26px; height: 26px; border-radius: 6px; display: block; }
   #yieldHint { display: none; font-size: 12px; color: var(--muted); background: var(--panel2); border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px; white-space: nowrap; }
@@ -105,13 +106,27 @@
   nav button.active { background: var(--panel2); border-color: var(--line); color: var(--text); }
   .spacer { flex: 1; }
 
-  main { flex: 1; overflow: auto; padding: 18px 20px 40px; }
-  .addbar { display: flex; gap: 10px; margin-bottom: 18px; }
-  .addbar input { flex: 1; }
-  .addbar button { padding: 0 22px; }
+  /* main padding is in theme.css .maincol main */
+  /* addbar restyled above */
 
   .empty { color: var(--muted); text-align: center; padding: 60px 0; }
-  .item { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; }
+  .item { display: grid; grid-template-columns: 40px minmax(0,1fr) auto; gap: 12px; align-items: center; padding: 11px 12px; margin-bottom: 9px; }
+  .item .ico { grid-row: 1 / span 4; }
+  .item .mid { min-width: 0; grid-column: 2; }
+  .item .ico { align-self: start; margin-top: 2px; }
+  .item .actions { grid-column: 3; grid-row: 1; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; max-width: 220px; align-self: start; }
+  .item .actions button { padding: 4px 9px; font-size: 11px; }
+  .item .children { grid-column: 1 / -1; }
+  .seg { display: flex; gap: 3px; height: 8px; margin: 8px 0 6px; }
+  .seg i { flex: 1; border-radius: 2px; background: var(--neutral); }
+  .seg i.on { background: var(--accent); }
+  .seg.Done i.on, .seg.Seeding i.on { background: var(--ok); }
+  .seg.Error i.on { background: var(--bad); }
+  .seg.Paused i.on { background: var(--warn); }
+  .bar { display: none; }
+  .stats-row { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; margin-bottom: 12px; }
+  .addbar { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; }
+  .addbar #url { flex: 1; height: 34px; border: 0; background: var(--neutral); border-radius: 999px; padding: 0 14px; }
   .row1 { display: flex; align-items: center; gap: 10px; }
   .name { font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .badge { font-size: 12px; padding: 2px 9px; border-radius: 99px; background: var(--panel2); color: var(--muted); border: 1px solid var(--line); white-space: nowrap; }
@@ -151,7 +166,7 @@
   .toolbar { display: flex; gap: 10px; margin-bottom: 14px; }
   .toolbar input { flex: 1; }
 
-  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px; max-width: 640px; }
+  .settings-card { background: var(--surface); border: 1px solid var(--border); border-radius: 18px; padding: 18px; max-width: 640px; }
   .field { margin-bottom: 16px; }
   .field label { display: block; font-weight: 600; margin-bottom: 6px; }
   .field .hint { color: var(--muted); font-size: 12px; margin-top: 4px; }
@@ -213,20 +228,26 @@
 </style>
 </head>
 <body>
-<header>
-  <div class="logo">
-    <img src="icon-32.png" alt="">
-    BDDM
-  </div>
+<div class="app" id="appShell">
+<aside class="sidebar">
+  <div class="brand"><img src="icon-32.png" alt="">BDDM</div>
+  <button type="button" class="nav on" data-filter="all" data-tab="downloads">All<span class="count" id="navAll">0</span></button>
+  <button type="button" class="nav" data-filter="Video" data-tab="downloads">Videos<span class="count" id="navVideo">0</span></button>
+  <button type="button" class="nav" data-filter="Audio" data-tab="downloads">Music<span class="count" id="navAudio">0</span></button>
+  <button type="button" class="nav" data-filter="Documents" data-tab="downloads">Documents<span class="count" id="navDocuments">0</span></button>
+  <button type="button" class="nav" data-filter="Programs" data-tab="downloads">Programs<span class="count" id="navPrograms">0</span></button>
+  <button type="button" class="nav" data-filter="torrent" data-tab="downloads">Torrents<span class="count" id="navTorrent">0</span></button>
+  <div class="sidebar-grow"></div>
+  <button type="button" class="nav" data-tab="settings" id="navSettings">Settings</button>
+</aside>
+<div class="maincol">
+<div class="topbar">
   <span id="yieldHint" title="BDDM is using less bandwidth so browsing and other apps stay quick.">Saving bandwidth</span>
-  <nav>
-    <button data-tab="downloads" class="active">Downloads</button>
-    <button data-tab="settings">Settings</button>
-  </nav>
-  <div class="spacer"></div>
-  <button id="openDir" title="Open the downloads folder">Open downloads folder</button>
-  <button id="quitBtn" class="danger" title="Pause all downloads and close BDDM">Quit</button>
-</header>
+  <div class="topbar-actions">
+    <button id="openDir" class="pill" title="Open the downloads folder">Open folder</button>
+    <button id="quitBtn" class="pill danger" title="Pause all downloads and close BDDM">Quit</button>
+  </div>
+</div>
 <div id="offline">BDDM is not running. Start it again to continue.</div>
 <div id="updateBanner">
   <span id="updateText">A new version of BDDM is available</span>
@@ -245,8 +266,8 @@
 <main>
   <section id="tab-downloads">
     <div class="addbar">
-      <input id="url" type="text" placeholder="Paste a download, video, or magnet link here" autocomplete="off" spellcheck="false">
-      <button id="addBtn" class="primary">Download</button>
+      <input id="url" type="text" placeholder="Search or paste a link, video, or magnet" autocomplete="off" spellcheck="false">
+      <button id="addBtn" class="pill prim">Add URL</button>
       <button id="torrentBtn" title="Add a .torrent file">Add torrent file</button>
       <input id="torrentFile" type="file" accept=".torrent,application/x-bittorrent" hidden>
       <button id="moreBtn" title="Mirror links and checksum">Options</button>
@@ -257,12 +278,17 @@
       <label for="hash">Checksum (optional): MD5, SHA-1, SHA-256 or SHA-512 from the website. BDDM checks the file when it is done.</label>
       <input id="hash" type="text" spellcheck="false" autocomplete="off" placeholder="sha256:3a7bd3e2360a3d...">
     </div>
+    <div class="stats-row" id="statsRow">
+      <div class="stat"><span class="meta">Speed</span><b id="statSpeed">0 B/s</b></div>
+      <div class="stat"><span class="meta">Active</span><b id="statActive">0</b></div>
+      <div class="stat"><span class="meta" id="statThirdLabel">Completed today</span><b id="statThird">0</b></div>
+    </div>
     <div id="list"></div>
     <div id="emptyList" class="empty">No downloads yet. Paste a link above and press Download.</div>
   </section>
 
   <section id="tab-settings" hidden>
-    <div class="card">
+    <div class="card settings-card">
       <div class="field">
         <label for="setDir">Download folder</label>
         <div class="line">
@@ -316,7 +342,7 @@
       <div class="hint" style="margin:-10px 0 16px">BDDM looks for a new version on GitHub when it starts and about every 6 hours. It only installs when you press Install.</div>
       <button id="saveSettings" class="primary">Save settings</button>
     </div>
-    <div class="card" style="margin-top:16px">
+    <div class="card settings-card" style="margin-top:16px">
       <div class="field" style="margin-bottom:8px">
         <label>Folders by file type</label>
         <div class="hint">Each type of file can go to its own folder. Leave a folder empty to use the main download folder. When you choose another folder in the "Download File Info" window, BDDM remembers it for that file type.</div>
@@ -333,7 +359,7 @@
       <button id="settingsInstallBtn" class="small primary" hidden>Install</button>
       <div id="updateStatus" class="hint" style="margin-top:6px"></div>
     </div>
-    <div class="card" style="margin-top:16px">
+    <div class="card settings-card" style="margin-top:16px">
       <div class="field" style="margin-bottom:8px">
         <label>Video tools</label>
         <div class="hint">yt-dlp, ffmpeg and deno download videos from YouTube, Facebook, Instagram, TikTok and many other sites. yt-dlp updates itself once a day.</div>
@@ -355,6 +381,8 @@
     </div>
   </section>
 </main>
+</div>
+</div>
 
 <div id="dlgConfirm" class="overlay">
   <div class="dialog">
@@ -438,6 +466,84 @@ function fmtTime(t) {
   const d = new Date(t);
   return d.toLocaleDateString() + " " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
+const CAT_EXT = {
+  Video: "mp4 mkv webm avi mov m4v wmv flv ts m2ts mpeg mpg 3gp".split(" "),
+  Audio: "mp3 flac aac m4a wav ogg opus wma aiff".split(" "),
+  Documents: "pdf doc docx xls xlsx ppt pptx txt rtf odt ods odp csv epub".split(" "),
+  Programs: "exe msi msp appx msix apk dmg pkg deb rpm appimage".split(" "),
+  Compressed: "zip rar 7z tar gz tgz bz2 xz iso cab".split(" "),
+  Images: "jpg jpeg png gif webp bmp tiff svg heic".split(" ")
+};
+function fileExt(name) {
+  const n = (name || "").toLowerCase();
+  const i = n.lastIndexOf(".");
+  return i >= 0 ? n.slice(i + 1) : "";
+}
+function fileCategory(j) {
+  if (j.kind === "torrent") return "torrent";
+  if (j.kind === "video") return "Video";
+  const ext = fileExt(j.name);
+  for (const cat of Object.keys(CAT_EXT)) if (CAT_EXT[cat].includes(ext)) return cat;
+  return "Other";
+}
+function catIcon(cat, status) {
+  if (status === "Done") return { cls: "ico done", g: "\u2713" };
+  const map = {
+    Video: { cls: "ico violet", g: "\u25B6" },
+    Audio: { cls: "ico orange", g: "\u266A" },
+    Documents: { cls: "ico accent", g: "\u25A6" },
+    Programs: { cls: "ico green", g: "\u2318" },
+    Compressed: { cls: "ico orange", g: "\u25A3" },
+    Images: { cls: "ico violet", g: "\u25A3" },
+    torrent: { cls: "ico accent", g: "\u21C5" },
+    Other: { cls: "ico accent", g: "\u2193" }
+  };
+  return map[cat] || map.Other;
+}
+function jobMatchesFilter(j, filter) {
+  if (!filter || filter === "all") return true;
+  if (filter === "torrent") return j.kind === "torrent";
+  return fileCategory(j) === filter;
+}
+function setSeg(el, pct, status) {
+  if (!el) return;
+  const n = Math.round(Math.max(0, Math.min(100, pct)) / 12.5);
+  el.className = "seg " + (status || "");
+  const kids = el.children;
+  for (let i = 0; i < kids.length; i++) kids[i].classList.toggle("on", i < n);
+}
+function updateNavAndStats(jobs, groups) {
+  const counts = { all: 0, Video: 0, Audio: 0, Documents: 0, Programs: 0, torrent: 0 };
+  let speed = 0, up = 0, active = 0, doneToday = 0;
+  const start = new Date(); start.setHours(0, 0, 0, 0);
+  for (const j of jobs || []) {
+    counts.all++;
+    const c = fileCategory(j);
+    if (c in counts) counts[c]++;
+    if (j.status === "Downloading") { active++; speed += (j.speed || 0); }
+    if (j.status === "Seeding") up += (j.upSpeed || 0);
+    else if (j.status === "Downloading") up += (j.upSpeed || 0);
+    if (j.status === "Done" && j.finished && !String(j.finished).startsWith("0001") && new Date(j.finished) >= start) doneToday++;
+  }
+  for (const g of groups || []) {
+    counts.all++;
+    if (g.status === "Downloading") { active++; speed += (g.speed || 0); }
+  }
+  const setCount = (id, n) => { const e = $(id); if (e) e.textContent = String(n); };
+  setCount("navAll", counts.all);
+  setCount("navVideo", counts.Video);
+  setCount("navAudio", counts.Audio);
+  setCount("navDocuments", counts.Documents);
+  setCount("navPrograms", counts.Programs);
+  setCount("navTorrent", counts.torrent);
+  if ($("statSpeed")) $("statSpeed").textContent = speed > 0 ? fmtSpeed(speed) : "0 B/s";
+  if ($("statActive")) $("statActive").textContent = String(active);
+  if ($("statThird")) {
+    if (up > 0) { $("statThirdLabel").textContent = "Upload"; $("statThird").textContent = fmtSpeed(up); }
+    else { $("statThirdLabel").textContent = "Completed today"; $("statThird").textContent = String(doneToday); }
+  }
+}
+
 function el(tag, cls, text) {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
@@ -495,13 +601,22 @@ function confirmBox(title, text, okText, checkText) {
   });
 }
 
-// ---------- tabs ----------
-document.querySelectorAll("nav button").forEach((b) => {
+// ---------- tabs + sidebar filters ----------
+let listFilter = "all";
+function showTab(tab) {
+  currentTab = tab;
+  for (const t of ["downloads", "settings"]) $("tab-" + t).hidden = t !== currentTab;
+  document.querySelectorAll("[data-tab]").forEach((x) => {
+    if (x.dataset.tab === "settings") x.classList.toggle("on", currentTab === "settings");
+    else x.classList.toggle("on", currentTab === "downloads" && (x.dataset.filter || "all") === listFilter);
+  });
+  if (currentTab === "settings") loadSettings();
+}
+document.querySelectorAll("[data-tab]").forEach((b) => {
   b.onclick = () => {
-    currentTab = b.dataset.tab;
-    document.querySelectorAll("nav button").forEach((x) => x.classList.toggle("active", x === b));
-    for (const t of ["downloads", "settings"]) $("tab-" + t).hidden = t !== currentTab;
-    if (currentTab === "settings") loadSettings();
+    if (b.dataset.filter) listFilter = b.dataset.filter;
+    showTab(b.dataset.tab);
+    if (b.dataset.tab === "downloads") refresh();
   };
 });
 
@@ -560,6 +675,8 @@ $("torrentFile").addEventListener("change", async () => {
 function makeRow(j) {
   const r = el("div", "item");
   r._jobId = j.id;
+  r._ico = el("div", "ico accent");
+  const mid = el("div", "mid");
   const row1 = el("div", "row1");
   r._name = el("div", "name");
   r._badge = el("span", "badge");
@@ -567,10 +684,15 @@ function makeRow(j) {
   r._bar = el("div", "bar");
   r._fill = el("div");
   r._bar.append(r._fill);
+  r._seg = el("div", "seg");
+  for (let i = 0; i < 8; i++) r._seg.append(document.createElement("i"));
   const row2 = el("div", "row2");
   const stats = el("div", "stats");
   r._size = el("span"); r._speed = el("span"); r._eta = el("span");
   stats.append(r._size, r._speed, r._eta);
+  row2.append(stats);
+  r._msg = el("div", "msg");
+  mid.append(row1, r._bar, r._seg, row2, r._msg);
   const actions = el("div", "actions");
   r._pause = el("button", "small", "Pause");
   r._resume = el("button", "small", "Resume");
@@ -585,10 +707,7 @@ function makeRow(j) {
   r._limit = el("button", "small", "Speed limit");
   r._limit.title = "Set a speed limit for this download only";
   actions.append(r._first, r._up, r._down, r._pause, r._resume, r._limit, r._open, r._del);
-
-  row2.append(stats, actions);
-  r._msg = el("div", "msg");
-  r.append(row1, r._bar, row2, r._msg);
+  r.append(r._ico, mid, actions);
   const move = (where) => api("/api/jobs/" + j.id + "/move", { where }).then(refresh).catch((e) => toast("Error", e.message, "bad"));
   r._first.onclick = () => move("first");
   r._up.onclick = () => move("up");
@@ -612,7 +731,11 @@ function updateRow(r, j) {
   r._kind = j.kind;
   r._dlLimit = j.dlLimit;
   r._ulLimit = j.ulLimit;
-  r._name.textContent = (j.kind === "video" ? "\u25B6 " : "") + j.name;
+  const cat = fileCategory(j);
+  const ic = catIcon(cat, j.status);
+  r._ico.className = ic.cls;
+  r._ico.textContent = ic.g;
+  r._name.textContent = j.name;
   r._name.title = j.url;
   const label = j.viewOnly ? "View only" : j.status;
   r._badge.textContent = label;
@@ -622,6 +745,7 @@ function updateRow(r, j) {
   const pct = known ? Math.min(100, (j.done * 100) / j.size) : (j.status === "Done" || seeding ? 100 : 0);
   r._bar.className = "bar " + j.status + (!known && j.status === "Downloading" ? " unknown" : "");
   r._fill.style.width = pct.toFixed(1) + "%";
+  setSeg(r._seg, pct, j.status);
   let sizeText = known ? fmtSize(j.done, true) + " / " + fmtSize(j.size) + "  (" + pct.toFixed(1) + "%)" : fmtSize(j.done, true) + " downloaded";
   if (j.kind === "torrent" && (j.status === "Downloading" || seeding || j.peers > 0)) {
     const n = j.peers || 0;
@@ -674,6 +798,8 @@ function saveOpenGroups() { localStorage.setItem("bddmOpenGroups", JSON.stringif
 
 function makeGroupRow(g) {
   const r = el("div", "item group");
+  r._ico = el("div", "ico accent", "\u25A6");
+  const mid = el("div", "mid");
   const row1 = el("div", "row1");
   r._toggle = el("button", "toggle", "\u25B8");
   r._toggle.title = "Show the files";
@@ -698,10 +824,13 @@ function makeGroupRow(g) {
   r._open = el("button", "small", "Open folder");
   r._del = el("button", "small danger", "Delete");
   actions.append(r._pause, r._resume, r._retry, r._open, r._del);
-  row2.append(stats, actions);
+  row2.append(stats);
   r._msg = el("div", "msg");
+  r._seg = el("div", "seg");
+  for (let i = 0; i < 8; i++) r._seg.append(document.createElement("i"));
+  mid.append(row1, r._bar, r._seg, row2, r._msg);
   r._kids = el("div", "children");
-  r.append(row1, r._bar, row2, r._msg, r._kids);
+  r.append(r._ico, mid, actions, r._kids);
 
   const act = (what, body) => api("/api/groups/" + g.id + "/" + what, body || {}).then(refresh).catch((e) => toast("Error", e.message, "bad"));
   const flip = () => {
@@ -737,6 +866,7 @@ function updateGroupRow(r, g, kids) {
   const pct = known ? Math.min(100, (g.done * 100) / g.size) : (g.total ? (g.finishedFiles * 100) / g.total : 0);
   r._bar.className = "bar " + g.status;
   r._fill.style.width = pct.toFixed(1) + "%";
+  setSeg(r._seg, pct, g.status);
   r._size.textContent = known ? fmtSize(g.done, true) + " / " + fmtSize(g.size) + "  (" + pct.toFixed(1) + "%)" : fmtSize(g.done, true) + " downloaded";
   const active = g.status === "Downloading";
   r._speed.textContent = active ? "Speed: " + (g.speed > 0 ? fmtSpeed(g.speed) : "connecting...") : "";
@@ -827,16 +957,22 @@ function placeRows(box, jobs) {
 }
 
 function renderList(jobs, groups) {
+  updateNavAndStats(jobs, groups);
   const list = $("list");
   const seen = new Set();
   const byGroup = {};
   const gIds = new Set((groups || []).map((g) => g.id));
   const top = []; // {t, kind, v}
+  const filter = listFilter || "all";
   for (const j of jobs) {
     if (j.group && gIds.has(j.group)) { (byGroup[j.group] = byGroup[j.group] || []).push(j); continue; }
+    if (!jobMatchesFilter(j, filter)) continue;
     top.push({ t: j.started, kind: "job", v: j });
   }
-  for (const g of groups || []) top.push({ t: g.started, kind: "group", v: g });
+  for (const g of groups || []) {
+    if (filter !== "all") continue;
+    top.push({ t: g.started, kind: "group", v: g });
+  }
   top.sort((a, b) => (a.t < b.t ? 1 : a.t > b.t ? -1 : 0));
   top.forEach((e, i) => {
     let r;
@@ -916,7 +1052,7 @@ async function loadTools() {
   $("toolsList").innerHTML = "";
   for (const k of Object.keys(names)) {
     const d = el("div", "", (t.tools[k] ? "\u2714 " : "\u2716 ") + names[k] + (t.tools[k] ? "" : " - missing"));
-    d.style.color = t.tools[k] ? "#86efac" : "#fca5a5";
+    d.style.color = t.tools[k] ? "var(--text-success)" : "var(--text-danger)";
     if (t.paths[k]) d.title = t.paths[k];
     $("toolsList").append(d);
   }
