@@ -24,6 +24,7 @@ const (
 	hwndNotopmost = ^uintptr(1) // HWND_NOTOPMOST
 	swpNosize     = 0x0001
 	swpNomove     = 0x0002
+	swpShowwindow = 0x0040
 	gwOwner       = 4
 	gaRoot        = 2
 	asfwAny       = ^uint32(0) // ASFW_ANY
@@ -312,6 +313,15 @@ func setForegroundWindow(hwnd uintptr) bool {
 }
 func setWindowPos(hwnd, insertAfter uintptr, flags uint32) {
 	procSetWindowPos.Call(hwnd, insertAfter, 0, 0, 0, 0, uintptr(flags))
+}
+
+// setWindowPosRect places hwnd at a physical-pixel rectangle. Used to force
+// the compact tray popup size so Chromium cannot restore a large window.
+func setWindowPosRect(hwnd uintptr, x, y, w, h int) {
+	if hwnd == 0 || !isWindow(hwnd) || w < 1 || h < 1 {
+		return
+	}
+	procSetWindowPos.Call(hwnd, 0, uintptr(int32(x)), uintptr(int32(y)), uintptr(int32(w)), uintptr(int32(h)), uintptr(swpShowwindow))
 }
 func allowSetForegroundWindow(pid uint32) {
 	procAllowSetForegroundWindow.Call(uintptr(pid))

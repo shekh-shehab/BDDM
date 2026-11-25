@@ -5,8 +5,10 @@ package main
 import (
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -374,5 +376,184 @@ func runTrayCommand(cmd uintptr) {
 		if quit != nil {
 			go quit()
 		}
+	}
+}
+
+const (
+	monitorDefaultToNearest = 2
+	mdtEffectiveDPI         = 0
+)
+
+var (
+	procMonitorFromPoint = user32.NewProc("MonitorFromPoint")
+	procGetMonitorInfoW  = user32.NewProc("GetMonitorInfoW")
+	procGetDpiForSystem  = user32.NewProc("GetDpiForSystem")
+	shcore               = syscall.NewLazyDLL("shcore.dll")
+	procGetDpiForMonitor = shcore.NewProc("GetDpiForMonitor")
+)
+
+type monitorInfo struct {
+	cbSize  uint32
+	monitor winRect
+	work    winRect
+	flags   uint32
+}
+
+func cursorPoint() winPoint {
+	var pt winPoint
+	procGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
+	return pt
+}
+
+func monitorFromPoint(x, y int32) uintptr {
+	packed := uintptr(uint32(x)) | uintptr(uint32(y))<<32
+	mon, _, _ := procMonitorFromPoint.Call(packed, monitorDefaultToNearest)
+	return mon
+}
+
+func workAreaAt(x, y int32) winRect {
+	mon := monitorFromPoint(x, y)
+	if mon == 0 {
+		return winRect{}
+	}
+	var info monitorInfo
+	info.cbSize = uint32(unsafe.Sizeof(info))
+	r, _, _ := procGetMonitorInfoW.Call(mon, uintptr(unsafe.Pointer(&info)))
+	if r == 0 {
+		return winRect{}
+	}
+	return info.work
+}
+
+func dpiAt(x, y int32) int {
+	mon := monitorFromPoint(x, y)
+	if mon != 0 && procGetDpiForMonitor.Find() == nil {
+		var dx, dy uint32
+		r, _, _ := procGetDpiForMonitor.Call(mon, mdtEffectiveDPI, uintptr(unsafe.Pointer(&dx)), uintptr(unsafe.Pointer(&dy)))
+		if r == 0 && dx >= 96 {
+			return int(dx)
+		}
+	}
+	if procGetDpiForSystem.Find() == nil {
+		r, _, _ := procGetDpiForSystem.Call()
+		if r >= 96 {
+			return int(r)
+		}
+	}
+	return 96
+}
+
+func isTrayPopupWindow(w enumWnd) bool {
+	t := strings.TrimSpace(w.title)
+	return t == "BDDM tray" || strings.HasPrefix(t, "BDDM tray")
+}
+
+func existingTrayPopupHWND() uintptr {
+	for _, w := range enumTopWindows() {
+		if isTrayPopupWindow(w) {
+			return w.hwnd
+		}
+	}
+	return 0
+}
+
+func trayBrowserCandidates() (paths []string, edgeCount int) {
+	for _, env := range []string{"ProgramFiles(x86)", "ProgramFiles", "LocalAppData"} {
+		if base := os.Getenv(env); base != "" {
+			paths = append(paths, filepath.Join(base, "Microsoft", "Edge", "Application", "msedge.exe"))
+		}
+	}
+	edgeCount = len(paths)
+	for _, env := range []string{"ProgramFiles", "ProgramFiles(x86)", "LocalAppData"} {
+		if base := os.Getenv(env); base != "" {
+			paths = append(paths, filepath.Join(base, "Google", "Chrome", "Application", "chrome.exe"))
+		}
+	}
+	return
+}
+
+// openTrayPopupWindow opens the compact tray popup in a dedicated Chromium
+// profile, then forces its size and position in physical pixels.
+func openTrayPopupWindow(u string, w, h int) {
+	if w < 1 {
+		w = trayPopupWidth
+	}
+	if h < 1 {
+		h = trayPopupHeight
+	}
+	pt := cursorPoint()
+	work := workAreaAt(pt.x, pt.y)
+	dpi := dpiAt(pt.x, pt.y)
+	x, y, pw, ph := trayPopupRect(int(pt.x), int(pt.y), int(work.left), int(work.top), int(work.right), int(work.bottom), w, h, dpi)
+	if hwnd := existingTrayPopupHWND(); hwnd != 0 {
+		setWindowPosRect(hwnd, x, y, pw, ph)
+		activateWindow(hwnd)
+		return
+	}
+	dir := trayUserDataDir()
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		log.Printf("tray popup: user-data-dir: %v", err)
+	}
+	args := trayChromiumArgs(u, dir, w, h, physicalToDIP(x, dpi), physicalToDIP(y, dpi))
+	candidates, edgeCount := trayBrowserCandidates()
+	before := snapshotHWND()
+	start := func(cmd *exec.Cmd) error {
+		var err error
+		withForeground(func() { err = cmd.Start() })
+		return err
+	}
+	launched := false
+	for i, p := range candidates {
+		if i == edgeCount {
+			cmd := exec.Command("cmd", append([]string{"/c", "start", "", "msedge"}, args...)...)
+			hideConsole(cmd)
+			if start(cmd) == nil {
+				launched = true
+				break
+			}
+		}
+		if fileExists(p) {
+			cmd := exec.Command(p, args...)
+			if start(cmd) == nil {
+				launched = true
+				break
+			}
+		}
+	}
+	if !launched {
+		log.Printf("tray popup: could not start Edge or Chrome")
+		return
+	}
+	go placeTrayPopupWindow(before, x, y, pw, ph)
+}
+
+func placeTrayPopupWindow(before map[uintptr]bool, x, y, pw, ph int) {
+	deadline := time.Now().Add(2 * time.Second)
+	var hwnd uintptr
+	for hwnd == 0 && time.Now().Before(deadline) {
+		for _, w := range newWindowsSince(before) {
+			if isTrayPopupWindow(w) {
+				hwnd = w.hwnd
+				break
+			}
+		}
+		if hwnd == 0 {
+			hwnd = existingTrayPopupHWND()
+		}
+		if hwnd == 0 {
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+	if hwnd == 0 {
+		return
+	}
+	until := time.Now().Add(2 * time.Second)
+	for {
+		setWindowPosRect(hwnd, x, y, pw, ph)
+		activateWindow(hwnd)
+		if time.Now().After(until) || !isWindow(hwnd) {
+			return
+		}
+		time.Sleep(80 * time.Millisecond)
 	}
 }

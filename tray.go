@@ -1,6 +1,10 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+)
 
 // Tray menu labels (item 29). Kept here so tests and the Windows menu
 // stay in English and in sync.
@@ -106,6 +110,84 @@ func trayPopupURL(port string) string {
 	return "http://127.0.0.1:" + port + "/tray.html"
 }
 
+const (
+	// Compact tray popup size, in CSS pixels (DIP). Chromium --window-size
+	// uses this unit; Windows placement converts it with the monitor DPI.
+	trayPopupWidth  = 260
+	trayPopupHeight = 248
+)
+
 func openTrayPopup(port string) {
-	_ = openAppWindowSize(trayPopupURL(port), 240, 280)
+	openTrayPopupWindow(trayPopupURL(port), trayPopupWidth, trayPopupHeight)
+}
+
+// trayChromiumArgs launches a dedicated Edge/Chrome profile so the popup
+// cannot inherit the main BDDM window's saved size.
+func trayChromiumArgs(url, userDataDir string, w, h, x, y int) []string {
+	return []string{
+		"--user-data-dir=" + userDataDir,
+		"--no-first-run",
+		"--no-default-browser-check",
+		fmt.Sprintf("--window-size=%d,%d", w, h),
+		fmt.Sprintf("--window-position=%d,%d", x, y),
+		"--app=" + url,
+	}
+}
+
+func trayUserDataDir() string {
+	if d, err := os.UserConfigDir(); err == nil && d != "" {
+		return filepath.Join(d, "BDDM", "chromium-tray")
+	}
+	return filepath.Join(".", "BDDM-data", "chromium-tray")
+}
+
+func dipToPhysical(v, dpi int) int {
+	if dpi < 96 {
+		dpi = 96
+	}
+	return v * dpi / 96
+}
+
+func physicalToDIP(v, dpi int) int {
+	if dpi < 96 {
+		dpi = 96
+	}
+	return v * 96 / dpi
+}
+
+// trayPopupRect places a compact popup just above the tray cursor and
+// clamps it to the work area. dipW/dipH are CSS pixels; dpi is 96 at 100%.
+// The result is in physical pixels.
+func trayPopupRect(cursorX, cursorY, workL, workT, workR, workB, dipW, dipH, dpi int) (x, y, pw, ph int) {
+	if dpi < 96 {
+		dpi = 96
+	}
+	if dipW < 1 {
+		dipW = trayPopupWidth
+	}
+	if dipH < 1 {
+		dipH = trayPopupHeight
+	}
+	pw, ph = dipToPhysical(dipW, dpi), dipToPhysical(dipH, dpi)
+	margin := dipToPhysical(8, dpi)
+	if margin < 4 {
+		margin = 4
+	}
+	x = cursorX - pw/2
+	y = cursorY - ph - margin
+	if workR > workL && workB > workT {
+		if x+pw > workR-margin {
+			x = workR - margin - pw
+		}
+		if x < workL+margin {
+			x = workL + margin
+		}
+		if y+ph > workB-margin {
+			y = workB - margin - ph
+		}
+		if y < workT+margin {
+			y = workT + margin
+		}
+	}
+	return
 }

@@ -171,6 +171,23 @@ func newServer(m *Manager, port string, quit func(), upd *Updater) http.Handler 
 	mux.HandleFunc("POST /ext/show", func(w http.ResponseWriter, r *http.Request) {
 		reply(w, openAppWindow("http://127.0.0.1:"+s.port))
 	})
+	// Used by the compact tray popup (a separate Chromium profile) so
+	// "Show BDDM", "Add URL" and "Settings" open in the normal app windows.
+	mux.HandleFunc("POST /api/open", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Add bool   `json:"add"`
+			Tab string `json:"tab"`
+		}
+		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<12)).Decode(&body)
+		switch {
+		case body.Tab == "settings":
+			reply(w, openAppWindowSize(traySettingsURL(s.port), 900, 800))
+		case body.Add:
+			reply(w, openAppWindow(trayAddURL(s.port)))
+		default:
+			reply(w, openAppWindow("http://127.0.0.1:"+s.port))
+		}
+	})
 	mux.HandleFunc("GET /api/check", func(w http.ResponseWriter, r *http.Request) {
 		d := m.FindDone(strings.TrimSpace(r.URL.Query().Get("url")))
 		res := map[string]any{"duplicate": d != nil}

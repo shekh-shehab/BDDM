@@ -8,8 +8,9 @@
 <link rel="icon" type="image/png" sizes="128x128" href="icon.png">
 <link rel="stylesheet" href="theme.css">
 <style>
-  html, body { margin: 0; height: 100%; background: var(--page); }
-  .popup { height: 100%; background: var(--surface); padding: 10px; display: flex; flex-direction: column; gap: 2px; }
+  html, body { margin: 0; background: var(--page); }
+  body { width: 260px; }
+  .popup { background: var(--surface); padding: 10px; display: flex; flex-direction: column; gap: 2px; }
   .head { display: flex; align-items: center; gap: 8px; padding: 4px 8px 8px; }
   .head img { width: 24px; height: 24px; border-radius: 8px; }
   .mi { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; border: 0; background: transparent; border-radius: 12px; padding: 8px 10px; font-size: 13px; color: var(--text); cursor: pointer; }
@@ -63,13 +64,13 @@ async function refresh() {
     $("headline").textContent = "BDDM";
   }
 }
-function openPage(path) {
-  window.open(path, "_blank");
-  setTimeout(() => window.close(), 200);
+async function openMain(body) {
+  try { await api("/api/open", body || {}); } catch (e) {}
+  window.close();
 }
-$("show").onclick = () => openPage("/");
-$("add").onclick = () => openPage("/?add=1");
-$("settings").onclick = () => openPage("/?tab=settings");
+$("show").onclick = () => openMain({});
+$("add").onclick = () => openMain({ add: true });
+$("settings").onclick = () => openMain({ tab: "settings" });
 $("pause").onclick = async () => {
   try { await api("/api/pauseall", {}); } catch (e) {}
   refresh();
@@ -78,6 +79,9 @@ $("quit").onclick = async () => {
   try { await api("/api/quit", {}); } catch (e) {}
   window.close();
 };
+if (scheme !== "dark" && scheme !== "light") {
+  window.addEventListener("blur", () => window.close());
+}
 refresh();
 </script>
 </body>

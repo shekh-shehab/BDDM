@@ -9,3 +9,7 @@ func startTray(port string, quit func(), m *Manager) {}
 func stopTray() {}
 
 func setTrayTip(text string) {}
+
+func openTrayPopupWindow(u string, w, h int) {
+	_ = openAppWindowSize(u, w, h)
+}

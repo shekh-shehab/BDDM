@@ -472,7 +472,8 @@ func TestTrayMenuAndPopup(t *testing.T) {
 		`href="theme.css"`, `href="icon-32.png"`, `src="icon-32.png"`,
 		`id="show"`, `id="add"`, `id="pause"`, `id="settings"`, `id="quit"`,
 		trayMenuShow, trayMenuAddURL, trayMenuPauseAll, trayMenuSettings, trayMenuQuit,
-		"/api/pauseall", "/api/quit", "/?add=1", "/?tab=settings",
+		"/api/pauseall", "/api/quit", "/api/open", `add: true`, `tab: "settings"`,
+		`addEventListener("blur"`,
 	} {
 		if !strings.Contains(page, want) {
 			t.Errorf("ui/tray.html missing %q", want)
@@ -534,8 +535,10 @@ func TestTrayPopupRenders(t *testing.T) {
 	m.jobs = append([]*Job{j}, m.jobs...)
 	m.mu.Unlock()
 	base := startUITestServer(t, m)
-	chromeShot(t, chrome, base+"/tray.html?scheme=light", filepath.Join("ui-shots", "29-tray-light.png"), 240, 280)
-	chromeShot(t, chrome, base+"/tray.html?scheme=dark", filepath.Join("ui-shots", "29-tray-dark.png"), 240, 280)
+	chromeShot(t, chrome, base+"/tray.html?scheme=light", filepath.Join("ui-shots", "29-tray-light.png"), trayPopupWidth, trayPopupHeight)
+	chromeShot(t, chrome, base+"/tray.html?scheme=dark", filepath.Join("ui-shots", "29-tray-dark.png"), trayPopupWidth, trayPopupHeight)
+	chromeShot(t, chrome, base+"/tray.html?scheme=light", filepath.Join("ui-shots", "73-tray-popup-light.png"), trayPopupWidth, trayPopupHeight)
+	chromeShot(t, chrome, base+"/tray.html?scheme=dark", filepath.Join("ui-shots", "73-tray-popup-dark.png"), trayPopupWidth, trayPopupHeight)
 }
 
 func TestTaskbarProgressFromJobs(t *testing.T) {
