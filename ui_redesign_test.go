@@ -346,3 +346,87 @@ func TestConfirmProgressCompleteRenders(t *testing.T) {
 	chromeShot(t, chrome, base+"/complete.html?id=comp1&scheme=light", filepath.Join(dir, "26-complete-light.png"), 380, 240)
 	chromeShot(t, chrome, base+"/complete.html?id=comp1&scheme=dark", filepath.Join(dir, "26-complete-dark.png"), 380, 240)
 }
+
+func TestVideoDriveErrorPages(t *testing.T) {
+	video := readUI(t, "video.html")
+	for _, want := range []string{
+		`href="theme.css"`, `href="icon-32.png"`, `id="title"`, `id="thumb"`,
+		`id="qualities"`, `id="start"`, `id="later"`, `id="cancel"`, `id="dir"`,
+		`id="plSection"`, `opt("q", "best", "Best available"`,
+		"prefers-color-scheme: dark", `html[data-scheme="dark"]`,
+	} {
+		if !strings.Contains(video, want) {
+			t.Errorf("ui/video.html missing %q", want)
+		}
+	}
+	if strings.Contains(video, "h.height <= 1080") {
+		t.Error("old default (1080p cap) is still in video.html")
+	}
+	assertEnglishUI(t, "ui/video.html", video)
+
+	drive := readUI(t, "drive.html")
+	for _, want := range []string{
+		`href="theme.css"`, `href="icon-32.png"`, `id="tree"`, `id="all"`, `id="none"`,
+		`id="start"`, `id="later"`, `id="cancel"`, `id="dir"`, `id="browse"`, `id="again"`,
+		"dataset.scheme",
+	} {
+		if !strings.Contains(drive, want) {
+			t.Errorf("ui/drive.html missing %q", want)
+		}
+	}
+	assertEnglishUI(t, "ui/drive.html", drive)
+
+	errPage := readUI(t, "error.html")
+	for _, want := range []string{
+		`href="theme.css"`, `href="icon-32.png"`, `id="name"`, `id="reason"`, `id="fix"`,
+		`id="retry"`, `id="close"`, "Download failed",
+	} {
+		if !strings.Contains(errPage, want) {
+			t.Errorf("ui/error.html missing %q", want)
+		}
+	}
+	assertEnglishUI(t, "ui/error.html", errPage)
+
+	torrent := readUI(t, "torrent.html")
+	if !strings.Contains(torrent, `href="theme.css"`) {
+		t.Error("ui/torrent.html should use the shared theme")
+	}
+	assertEnglishUI(t, "ui/torrent.html", torrent)
+}
+
+func TestErrorPopupOnFailedJob(t *testing.T) {
+	_ = takePopupLog()
+	m, dl := newTestManager(t, 4)
+	j := &Job{ID: "err1", URL: "https://example.com/a.bin", Name: "a.bin", Status: StatusError, Dir: dl, Error: "HTTP 403 Forbidden"}
+	m.mu.Lock()
+	m.jobs = append([]*Job{j}, m.jobs...)
+	m.uiPort = "9"
+	m.markPopupLocked("err1")
+	m.offerCompleteLocked(j)
+	m.mu.Unlock()
+	time.Sleep(50 * time.Millisecond)
+	log := takePopupLog()
+	if len(log) != 1 || log[0] != "error:err1" {
+		t.Fatalf("wanted error:err1, got %v", log)
+	}
+}
+
+func TestVideoDriveErrorRenders(t *testing.T) {
+	chrome := findChrome()
+	if chrome == "" {
+		t.Skip("no chrome for a screenshot")
+	}
+	m, dl := newTestManager(t, 4)
+	errJob := &Job{ID: "errshot", URL: "https://example.com/episode_01.mp4", Name: "episode_01.mp4", Status: StatusError, Dir: dl, Error: "HTTP 403 Forbidden"}
+	m.mu.Lock()
+	m.jobs = append([]*Job{errJob}, m.jobs...)
+	m.mu.Unlock()
+	base := startUITestServer(t, m)
+	dir := "ui-shots"
+	// Video and Drive shells (pending id may 404; still records the themed chrome).
+	chromeShot(t, chrome, base+"/video.html?id=missing&scheme=light", filepath.Join(dir, "27-video-light.png"), 720, 760)
+	chromeShot(t, chrome, base+"/video.html?id=missing&scheme=dark", filepath.Join(dir, "27-video-dark.png"), 720, 760)
+	chromeShot(t, chrome, base+"/drive.html?id=missing&scheme=light", filepath.Join(dir, "27-drive-light.png"), 760, 720)
+	chromeShot(t, chrome, base+"/error.html?id=errshot&scheme=light", filepath.Join(dir, "27-error-light.png"), 420, 300)
+	chromeShot(t, chrome, base+"/error.html?id=errshot&scheme=dark", filepath.Join(dir, "27-error-dark.png"), 420, 300)
+}

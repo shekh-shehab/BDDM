@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Download failed</title>
+<link rel="icon" type="image/png" sizes="32x32" href="icon-32.png">
+<link rel="icon" type="image/png" sizes="128x128" href="icon.png">
+<link rel="stylesheet" href="theme.css">
+<style>
+  html, body { margin: 0; height: 100%; }
+  body { display: flex; align-items: stretch; }
+  .window { flex: 1; padding: 20px 22px 18px; text-align: center; background: var(--surface); }
+  .ico.danger { width: 48px; height: 48px; border-radius: 50%; font-size: 24px; margin: 0 auto 10px; }
+  h1 { font-size: 16px; font-weight: 600; margin: 0; }
+  .actions-row { justify-content: center; flex-wrap: wrap; margin-top: 16px; }
+</style>
+</head>
+<body>
+<div class="window">
+  <div class="ico danger" aria-hidden="true">!</div>
+  <h1>Download failed</h1>
+  <p class="meta" id="name" style="margin:6px 0 2px">—</p>
+  <p class="meta" id="reason" style="margin-bottom:6px">—</p>
+  <p class="meta" id="fix" style="margin-bottom:16px"></p>
+  <div class="actions-row">
+    <button type="button" class="pill prim" id="retry">Retry</button>
+    <button type="button" class="pill" id="folder">Open folder</button>
+    <button type="button" class="pill" id="close">Close</button>
+  </div>
+  <p class="hint" id="err" style="color:var(--text-danger);margin-top:8px"></p>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const q = new URLSearchParams(location.search);
+const id = q.get("id") || "";
+const scheme = q.get("scheme");
+if (scheme === "dark" || scheme === "light") document.documentElement.dataset.scheme = scheme;
+
+async function api(path, body) {
+  const opt = body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
+  const r = await fetch(path, opt);
+  let data = {};
+  try { data = await r.json(); } catch (e) {}
+  if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
+  return data;
+}
+(async () => {
+  if (!id) return;
+  try {
+    const j = await api("/api/jobs/" + encodeURIComponent(id));
+    $("name").textContent = j.name || "File";
+    $("reason").textContent = j.reason || j.error || "The download failed.";
+    $("fix").textContent = j.fix ? ("What to do: " + j.fix) : (j.viewOnly ? "Open it in Firefox and use Save as PDF from the BDDM extension." : "");
+    if (j.viewOnly) $("retry").hidden = true;
+  } catch (e) { $("err").textContent = e.message; }
+})();
+$("retry").onclick = async () => {
+  $("err").textContent = "";
+  try {
+    await api("/api/jobs/" + encodeURIComponent(id) + "/resume", {});
+    window.close();
+  } catch (e) { $("err").textContent = e.message; }
+};
+$("folder").onclick = async () => {
+  $("err").textContent = "";
+  try { await api("/api/jobs/" + encodeURIComponent(id) + "/open", {}); } catch (e) { $("err").textContent = e.message; }
+};
+$("close").onclick = () => window.close();
+</script>
+</body>
+</html>

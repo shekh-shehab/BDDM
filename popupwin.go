@@ -53,7 +53,7 @@ func openJobPopup(port, kind, id string) {
 	case "complete":
 		page, w, h = "complete", 380, 240
 	case "error":
-		page, w, h = "error", 420, 300
+		page, w, h = "error", 420, 360
 	}
 	u := popupURL(port, page, id)
 	recordPopup(kind, id, u)
@@ -127,7 +127,6 @@ func (m *Manager) offerCompleteLocked(j *Job) {
 	kind := "complete"
 	if j.Status != StatusDone {
 		kind = "error"
-		return // error window is item 27
 	}
 	port := m.uiPort
 	id := j.ID

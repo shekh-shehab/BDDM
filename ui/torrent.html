@@ -6,16 +6,13 @@
 <title>Add torrent</title>
 <link rel="icon" type="image/png" sizes="32x32" href="icon-32.png">
 <link rel="icon" type="image/png" sizes="128x128" href="icon.png">
+<link rel="stylesheet" href="theme.css">
 <style>
-  :root {
-    --bg: #14161b; --panel: #1c1f26; --panel2: #232733; --line: #2e3340;
-    --text: #e6e8ee; --muted: #8b93a7; --accent: #3b82f6; --accent2: #2563eb;
-    --ok: #22c55e; --warn: #f59e0b; --bad: #ef4444;
-  }
-  * { box-sizing: border-box; }
+  :root { --accent2: var(--text-accent); }
+* { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; }
   body { background: var(--bg); color: var(--text); font: 14px/1.4 "Segoe UI", system-ui, -apple-system, sans-serif; display: flex; flex-direction: column; }
-  header { display: flex; align-items: center; gap: 10px; padding: 12px 18px; background: var(--panel); border-bottom: 1px solid var(--line); font-weight: 700; font-size: 16px; }
+  header { display: flex; align-items: center; gap: 10px; padding: 12px 18px; background: var(--panel); border-bottom: 1px solid var(--line); font-weight: 600; font-size: 15px; }
   header img { width: 24px; height: 24px; flex: none; border-radius: 6px; display: block; }
   main { flex: 1; padding: 16px 18px 8px; overflow: auto; }
   .field { margin-bottom: 13px; }
@@ -29,9 +26,9 @@
   .row2 .field { flex: 1; min-width: 0; }
   .row2 .field.size { flex: 0 0 160px; }
   button { font: inherit; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; cursor: pointer; white-space: nowrap; }
-  button:hover { border-color: #49506a; background: #2a2f3d; }
+  button:hover { border-color: var(--hover-line); background: var(--hover-bg); }
   button:disabled { opacity: .45; cursor: default; }
-  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button.primary { background: var(--primary); border-color: transparent; color: var(--on-primary); font-weight: 600; border-radius: 999px; }
   button.primary:hover { background: var(--accent2); }
   .err { color: #fca5a5; font-size: 13px; min-height: 18px; }
   footer { display: flex; gap: 8px; align-items: center; padding: 12px 18px; background: var(--panel); border-top: 1px solid var(--line); }
@@ -189,6 +186,8 @@ window.addEventListener("pagehide", () => {
   }).catch(() => {});
 });
 load().then(() => { $("start").focus(); });
+const scheme = new URLSearchParams(location.search).get("scheme");
+if (scheme === "dark" || scheme === "light") document.documentElement.dataset.scheme = scheme;
 </script>
 </body>
 </html>

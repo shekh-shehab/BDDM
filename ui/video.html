@@ -6,57 +6,18 @@
 <title>Download Video</title>
 <link rel="icon" type="image/png" sizes="32x32" href="icon-32.png">
 <link rel="icon" type="image/png" sizes="128x128" href="icon.png">
+<link rel="stylesheet" href="theme.css">
 <style>
-  :root {
-    color-scheme: light;
-    --bg: #e6e9ee; --panel: #ffffff; --panel2: #eef0f3; --line: rgba(20,30,50,.10);
-    --text: #1a1d21; --muted: #5b6370; --accent: #2f6fed; --accent2: #1f55c4;
-    --ok: #1f9d62; --warn: #b45a12; --bad: #c0392b;
-    --hover-bg: #e4e7ed; --hover-line: rgba(20,30,50,.28);
-    --sel-bg: #e6eefd;
-    --warn-bg: #fdeede; --warn-fg: #b45a12; --warn-line: #f5d3a8;
-    --bad-bg: #fdecea; --bad-fg: #9b2c20; --bad-line: #f5c2c0;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      color-scheme: dark;
-      --bg: #14161b; --panel: #1c1f26; --panel2: #232733; --line: #2e3340;
-      --text: #e6e8ee; --muted: #8b93a7; --accent: #3b82f6; --accent2: #2563eb;
-      --ok: #22c55e; --warn: #f59e0b; --bad: #ef4444;
-      --hover-bg: #2a2f3d; --hover-line: #49506a;
-      --sel-bg: #172554;
-      --warn-bg: #2b1a05; --warn-fg: #fcd34d; --warn-line: #78350f;
-      --bad-bg: #2a0f12; --bad-fg: #fca5a5; --bad-line: #7f1d1d;
-    }
-  }
-  html[data-scheme="light"] {
-    color-scheme: light;
-    --bg: #e6e9ee; --panel: #ffffff; --panel2: #eef0f3; --line: rgba(20,30,50,.10);
-    --text: #1a1d21; --muted: #5b6370; --accent: #2f6fed; --accent2: #1f55c4;
-    --ok: #1f9d62; --warn: #b45a12; --bad: #c0392b;
-    --hover-bg: #e4e7ed; --hover-line: rgba(20,30,50,.28);
-    --sel-bg: #e6eefd;
-    --warn-bg: #fdeede; --warn-fg: #b45a12; --warn-line: #f5d3a8;
-    --bad-bg: #fdecea; --bad-fg: #9b2c20; --bad-line: #f5c2c0;
-  }
-  html[data-scheme="dark"] {
-    color-scheme: dark;
-    --bg: #14161b; --panel: #1c1f26; --panel2: #232733; --line: #2e3340;
-    --text: #e6e8ee; --muted: #8b93a7; --accent: #3b82f6; --accent2: #2563eb;
-    --ok: #22c55e; --warn: #f59e0b; --bad: #ef4444;
-    --hover-bg: #2a2f3d; --hover-line: #49506a;
-    --sel-bg: #172554;
-    --warn-bg: #2b1a05; --warn-fg: #fcd34d; --warn-line: #78350f;
-    --bad-bg: #2a0f12; --bad-fg: #fca5a5; --bad-line: #7f1d1d;
-  }
+  /* Tokens and html[data-scheme="dark"] / prefers-color-scheme: dark live in theme.css. */
+  :root { --sel-bg: var(--bg-accent); --warn-bg: var(--badge-pause-bg); --warn-fg: var(--badge-pause-fg); --warn-line: var(--badge-pause-bd); --bad-bg: var(--badge-err-bg); --bad-fg: var(--badge-err-fg); --bad-line: var(--badge-err-bd); --accent2: var(--text-accent); }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; }
   body { background: var(--bg); color: var(--text); font: 14px/1.4 "Segoe UI", system-ui, -apple-system, sans-serif; display: flex; flex-direction: column; }
-  header { display: flex; align-items: center; gap: 10px; padding: 12px 18px; background: var(--panel); border-bottom: 1px solid var(--line); font-weight: 700; font-size: 16px; }
+  header { display: flex; align-items: center; gap: 10px; padding: 12px 18px; background: var(--panel); border-bottom: 1px solid var(--line); font-weight: 600; font-size: 15px; }
   header img { width: 24px; height: 24px; flex: none; border-radius: 6px; display: block; }
   main { flex: 1; padding: 14px 18px 8px; overflow: auto; }
   .top { display: flex; gap: 14px; margin-bottom: 14px; }
-  .thumb { width: 176px; height: 99px; flex: none; border-radius: 8px; background: var(--panel2) center/cover no-repeat; border: 1px solid var(--line); display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 28px; }
+  .thumb { width: 176px; height: 99px; flex: none; border-radius: 14px; background: var(--panel2) center/cover no-repeat; border: 1px solid var(--line); display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 28px; }
   .meta { min-width: 0; flex: 1; }
   .title { font-weight: 700; font-size: 15px; line-height: 1.3; max-height: 3.9em; overflow: hidden; word-break: break-word; }
   .sub { color: var(--muted); font-size: 12px; margin-top: 4px; }
@@ -64,7 +25,7 @@
   .section { margin-bottom: 13px; }
   .label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; margin-bottom: 6px; }
   .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
-  .opt { display: flex; align-items: center; gap: 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; cursor: pointer; min-width: 0; }
+  .opt { display: flex; align-items: center; gap: 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 7px 10px; cursor: pointer; min-width: 0; }
   .opt:hover { border-color: var(--hover-line); }
   .opt.sel { border-color: var(--accent); background: var(--sel-bg); }
   .opt input { margin: 0; accent-color: var(--accent); }
@@ -74,15 +35,15 @@
   .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .check { display: flex; gap: 7px; align-items: center; margin-right: 14px; }
   .check input { accent-color: var(--accent); }
-  select, input[type=text] { font: inherit; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; outline: none; }
+  select, input[type=text] { font: inherit; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 14px; padding: 7px 10px; outline: none; }
   input[type=text] { flex: 1; width: 100%; }
   input:focus, select:focus { border-color: var(--accent); }
-  button { font: inherit; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; cursor: pointer; white-space: nowrap; }
+  button { font: inherit; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 14px; padding: 8px 14px; cursor: pointer; white-space: nowrap; }
   button:hover { border-color: var(--hover-line); background: var(--hover-bg); }
   button:disabled { opacity: .45; cursor: default; }
-  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button.primary { background: var(--primary); border-color: transparent; color: var(--on-primary); font-weight: 600; border-radius: 999px; }
   button.primary:hover { background: var(--accent2); }
-  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin-bottom: 13px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 12px 14px; margin-bottom: 13px; }
   .warn { background: var(--warn-bg); border-color: var(--warn-line); color: var(--warn-fg); font-size: 13px; }
   .bad { background: var(--bad-bg); border-color: var(--bad-line); color: var(--bad-fg); font-size: 13px; word-break: break-word; }
   .bar { height: 6px; background: var(--panel2); border-radius: 99px; overflow: hidden; margin: 6px 0 2px; }
