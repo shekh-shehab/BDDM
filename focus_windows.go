@@ -502,13 +502,26 @@ func isNewBrowserWindow(w enumWnd) bool {
 	return isBrowserAppExe(processExe(w.pid)) || w.class == "MozillaWindowClass"
 }
 
-func focusExistingMainWindow() bool {
+func isMainAppWindowTitle(t string) bool {
+	t = strings.TrimSpace(t)
+	return t == "BDDM - Download Manager" || t == "BDDM" || strings.HasPrefix(t, "BDDM - ")
+}
+
+func existingMainWindowHWND() uintptr {
 	for _, w := range listBDDMAppWindows() {
-		if w.title == "BDDM - Download Manager" || w.title == "BDDM" || strings.HasPrefix(w.title, "BDDM - ") {
-			return activateWindow(w.hwnd)
+		if isMainAppWindowTitle(w.title) {
+			return w.hwnd
 		}
 	}
-	return false
+	return 0
+}
+
+func focusExistingMainWindow() bool {
+	hwnd := existingMainWindowHWND()
+	if hwnd == 0 {
+		return false
+	}
+	return activateWindow(hwnd)
 }
 
 // focusOpenedWindow is used after we launch an Edge/Chrome app window: if

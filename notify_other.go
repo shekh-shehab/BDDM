@@ -111,16 +111,19 @@ func trimNL(s string) string {
 }
 
 // openAppWindow opens the UI in a Chrome/Chromium app window, or the default browser.
-func openAppWindow(u string) error { return openAppWindowSize(u, 1100, 720) }
+func openAppWindow(u string) error { return openAppWindowSize(u, mainWindowWidth, mainWindowHeight) }
 
 // openAppWindowSize opens u in an app window of w x h pixels.
 func openAppWindowSize(u string, w, h int) error {
 	if runtime.GOOS == "linux" && os.Getenv("DISPLAY") == "" && os.Getenv("WAYLAND_DISPLAY") == "" {
 		return errors.New("no display; open " + u + " in a browser")
 	}
+	dir := appUserDataDir()
+	_ = os.MkdirAll(dir, 0755)
+	args := appChromiumArgs(u, dir, w, h, 0, 0, false)
 	for _, b := range []string{"microsoft-edge", "google-chrome", "chromium", "chromium-browser"} {
 		if p, err := exec.LookPath(b); err == nil {
-			return exec.Command(p, "--app="+u, fmt.Sprintf("--window-size=%d,%d", w, h)).Start()
+			return exec.Command(p, args...).Start()
 		}
 	}
 	if runtime.GOOS == "darwin" {

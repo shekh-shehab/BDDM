@@ -447,6 +447,22 @@ func TestSettingsAndAboutRedesign(t *testing.T) {
 			t.Errorf("settings/about missing %q", want)
 		}
 	}
+	// Settings and About cards stretch with the content column instead of
+	// sitting as a narrow ~580-680px strip next to a large empty area.
+	for _, needle := range []string{`max-width: 640px`, `max-width: 680px`} {
+		if strings.Contains(index, needle) {
+			t.Errorf("settings/about still pin a narrow card with %q", needle)
+		}
+	}
+	for _, want := range []string{
+		`#tab-settings { width: 100%; max-width: 1600px;`,
+		`.settings-card { background: var(--surface); border: 1px solid var(--border); border-radius: 18px; padding: 18px; width: 100%; max-width: 1600px;`,
+		`.about-card { background: var(--surface); border: 1px solid var(--border); border-radius: 18px; padding: 22px 18px; width: 100%; max-width: 1600px;`,
+	} {
+		if !strings.Contains(index, want) {
+			t.Errorf("settings/about should fill the content width: missing %q", want)
+		}
+	}
 }
 
 func TestSettingsAndAboutRenders(t *testing.T) {
@@ -459,6 +475,20 @@ func TestSettingsAndAboutRenders(t *testing.T) {
 	dir := "ui-shots"
 	chromeShot(t, chrome, base+"/?tab=settings&scheme=light", filepath.Join(dir, "28-settings-light.png"), 1100, 1400)
 	chromeShot(t, chrome, base+"/?tab=settings&scheme=dark", filepath.Join(dir, "28-settings-dark.png"), 1100, 1400)
+}
+
+func TestSettingsFillsWindowScreenshots(t *testing.T) {
+	chrome := findChrome()
+	if chrome == "" {
+		t.Skip("no chrome for a screenshot")
+	}
+	m, _ := newTestManager(t, 4)
+	base := startUITestServer(t, m)
+	dir := "ui-shots"
+	chromeShot(t, chrome, base+"/?tab=settings&scheme=light", filepath.Join(dir, "74-settings-900x650-light.png"), mainWindowWidth, mainWindowHeight)
+	chromeShot(t, chrome, base+"/?tab=settings&scheme=dark", filepath.Join(dir, "74-settings-900x650-dark.png"), mainWindowWidth, mainWindowHeight)
+	chromeShot(t, chrome, base+"/?tab=settings&scheme=light", filepath.Join(dir, "74-settings-1920x1080-light.png"), 1920, 1080)
+	chromeShot(t, chrome, base+"/?tab=settings&scheme=dark", filepath.Join(dir, "74-settings-1920x1080-dark.png"), 1920, 1080)
 }
 
 func TestTrayMenuAndPopup(t *testing.T) {

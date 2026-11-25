@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 	"unicode/utf16"
+	"unsafe"
 )
 
 const createNoWindow = 0x08000000
@@ -294,28 +295,39 @@ try {
 
 // openAppWindow opens the UI as an app window: Edge, then Chrome, then the
 // default browser.
-func openAppWindow(u string) error { return openAppWindowSize(u, 1100, 720) }
+func openAppWindow(u string) error { return openAppWindowSize(u, mainWindowWidth, mainWindowHeight) }
 
 // openAppWindowSize opens u in an Edge (or Chrome) app window of w x h pixels
 // and brings that window to the front. If the main window is already open,
 // it is reused and brought to the front instead of starting a second one.
+// Main-window launches use a dedicated Chromium profile so a size saved in
+// the user's default Edge/Chrome profile cannot restore a maximized window.
+// The first time after this default is introduced, the window is forced to
+// 900x650 DIP, centred on the work area; later opens remember a size the
+// user chose themselves.
 func openAppWindowSize(u string, w, h int) error {
-	if isMainAppURL(u) && focusExistingMainWindow() {
-		return nil
-	}
-	args := []string{"--app=" + u, fmt.Sprintf("--window-size=%d,%d", w, h)}
-	var candidates []string
-	for _, env := range []string{"ProgramFiles(x86)", "ProgramFiles", "LocalAppData"} {
-		if base := os.Getenv(env); base != "" {
-			candidates = append(candidates, filepath.Join(base, "Microsoft", "Edge", "Application", "msedge.exe"))
+	force := isMainAppURL(u) && shouldForceMainWindowDefault()
+	if isMainAppURL(u) {
+		if hwnd := existingMainWindowHWND(); hwnd != 0 {
+			if force {
+				applyDefaultMainWindowPlacement(hwnd)
+			}
+			activateWindow(hwnd)
+			return nil
 		}
 	}
-	edgeCount := len(candidates)
-	for _, env := range []string{"ProgramFiles", "ProgramFiles(x86)", "LocalAppData"} {
-		if base := os.Getenv(env); base != "" {
-			candidates = append(candidates, filepath.Join(base, "Google", "Chrome", "Application", "chrome.exe"))
-		}
+	dir := appUserDataDir()
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		log.Printf("app window: user-data-dir: %v", err)
 	}
+	var posX, posY, physW, physH int
+	withPos := false
+	if force {
+		posX, posY, physW, physH, withPos = defaultMainWindowPlacement(w, h)
+	}
+	dipX, dipY := physicalToDIP(posX, primaryDPI()), physicalToDIP(posY, primaryDPI())
+	args := appChromiumArgs(u, dir, w, h, dipX, dipY, withPos)
+	candidates, edgeCount := trayBrowserCandidates()
 	before := snapshotHWND()
 	start := func(cmd *exec.Cmd) error {
 		var err error
@@ -328,7 +340,7 @@ func openAppWindowSize(u string, w, h int) error {
 			cmd := exec.Command("cmd", append([]string{"/c", "start", "", "msedge"}, args...)...)
 			hideConsole(cmd)
 			if start(cmd) == nil {
-				go focusOpenedWindow(u, before, 0)
+				go afterAppWindowLaunch(u, before, 0, force, posX, posY, physW, physH)
 				return nil
 			}
 		}
@@ -339,7 +351,7 @@ func openAppWindowSize(u string, w, h int) error {
 				if cmd.Process != nil {
 					pid = cmd.Process.Pid
 				}
-				go focusOpenedWindow(u, before, pid)
+				go afterAppWindowLaunch(u, before, pid, force, posX, posY, physW, physH)
 				return nil
 			}
 		}
@@ -348,6 +360,102 @@ func openAppWindowSize(u string, w, h int) error {
 	if err := start(cmd); err != nil {
 		return err
 	}
-	go focusOpenedWindow(u, before, 0)
+	go afterAppWindowLaunch(u, before, 0, force, posX, posY, physW, physH)
 	return nil
+}
+
+func afterAppWindowLaunch(u string, before map[uintptr]bool, startedPID int, force bool, x, y, pw, ph int) {
+	if force {
+		placeNewMainWindow(before, x, y, pw, ph)
+		scheduleTagBDDMAppWindows()
+		return
+	}
+	focusOpenedWindow(u, before, startedPID)
+}
+
+func primaryMonitor() uintptr {
+	mon, _, _ := procMonitorFromPoint.Call(0, 1) // MONITOR_DEFAULTTOPRIMARY
+	return mon
+}
+
+func primaryWorkArea() winRect {
+	mon := primaryMonitor()
+	if mon == 0 {
+		return winRect{}
+	}
+	var info monitorInfo
+	info.cbSize = uint32(unsafe.Sizeof(info))
+	r, _, _ := procGetMonitorInfoW.Call(mon, uintptr(unsafe.Pointer(&info)))
+	if r == 0 {
+		return winRect{}
+	}
+	return info.work
+}
+
+func primaryDPI() int {
+	mon := primaryMonitor()
+	if mon != 0 && procGetDpiForMonitor.Find() == nil {
+		var dx, dy uint32
+		r, _, _ := procGetDpiForMonitor.Call(mon, mdtEffectiveDPI, uintptr(unsafe.Pointer(&dx)), uintptr(unsafe.Pointer(&dy)))
+		if r == 0 && dx >= 96 {
+			return int(dx)
+		}
+	}
+	if procGetDpiForSystem.Find() == nil {
+		r, _, _ := procGetDpiForSystem.Call()
+		if r >= 96 {
+			return int(r)
+		}
+	}
+	return 96
+}
+
+func defaultMainWindowPlacement(dipW, dipH int) (x, y, pw, ph int, ok bool) {
+	work := primaryWorkArea()
+	dpi := primaryDPI()
+	x, y, pw, ph = mainWindowCenteredRect(int(work.left), int(work.top), int(work.right), int(work.bottom), dipW, dipH, dpi)
+	return x, y, pw, ph, true
+}
+
+func applyDefaultMainWindowPlacement(hwnd uintptr) {
+	if hwnd == 0 {
+		return
+	}
+	x, y, pw, ph, _ := defaultMainWindowPlacement(mainWindowWidth, mainWindowHeight)
+	showWindow(hwnd, swRestore)
+	setWindowPosRect(hwnd, x, y, pw, ph)
+	markMainWindowDefaultApplied()
+}
+
+func placeNewMainWindow(before map[uintptr]bool, x, y, pw, ph int) {
+	deadline := time.Now().Add(3 * time.Second)
+	var hwnd uintptr
+	for hwnd == 0 && time.Now().Before(deadline) {
+		for _, w := range newWindowsSince(before) {
+			if isMainAppWindowTitle(w.title) {
+				hwnd = w.hwnd
+				break
+			}
+		}
+		if hwnd == 0 {
+			hwnd = existingMainWindowHWND()
+		}
+		if hwnd == 0 {
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+	if hwnd == 0 {
+		return
+	}
+	until := time.Now().Add(2 * time.Second)
+	for {
+		showWindow(hwnd, swRestore)
+		setWindowPosRect(hwnd, x, y, pw, ph)
+		activateWindow(hwnd)
+		if time.Now().After(until) || !isWindow(hwnd) {
+			markMainWindowDefaultApplied()
+			return
+		}
+		time.Sleep(80 * time.Millisecond)
+	}
 }
