@@ -7,6 +7,7 @@
 <link rel="icon" type="image/png" sizes="32x32" href="icon-32.png">
 <link rel="icon" type="image/png" sizes="128x128" href="icon.png">
 <link rel="stylesheet" href="theme.css">
+<script src="scheme.js"></script>
 <style>
   :root {
     color-scheme: light;
@@ -311,6 +312,15 @@
   <section id="tab-settings" hidden>
     <h2>Settings</h2>
     <div class="card settings-card">
+      <div class="field">
+        <label for="setTheme">Theme</label>
+        <select id="setTheme">
+          <option value="system">System (follow Windows)</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
+        <div class="hint">Applies at once to every BDDM window.</div>
+      </div>
       <div class="field">
         <label for="setDir">Download folder</label>
         <div class="line">
@@ -1109,6 +1119,8 @@ async function loadSettings() {
   $("setNotify").checked = s.notifications;
   $("setAsk").checked = s.askCaptured;
   $("setCookies").value = s.cookiesBrowser || "";
+  $("setTheme").value = s.theme || "system";
+  if (window.bddmSetTheme) window.bddmSetTheme(s.theme || "system");
   $("setAutostart").checked = !!s.startWithWindows;
   $("setResume").checked = !!s.resumeOnStart;
   $("setCheckUpdates").checked = s.checkUpdates !== false;
@@ -1178,7 +1190,7 @@ $("saveSettings").onclick = async () => {
       yieldToOther: $("setYield").checked,
       askCaptured: $("setAsk").checked, cookiesBrowser: $("setCookies").value,
       startWithWindows: $("setAutostart").checked, resumeOnStart: $("setResume").checked,
-      checkUpdates: $("setCheckUpdates").checked,
+      checkUpdates: $("setCheckUpdates").checked, theme: $("setTheme").value,
     });
     $("setDir").value = s.downloadDir; $("setParts").value = s.parts; $("setActive").value = s.maxActive;
     $("limHTTP").value = speedIndex(s.httpDownloadLimit);
@@ -1189,6 +1201,15 @@ $("saveSettings").onclick = async () => {
     $("limTorUp").dispatchEvent(new Event("input"));
     toast("Settings saved", "Speed limits apply at once to running downloads.", "ok");
   } catch (e) { toast("Could not save settings", e.message, "bad"); }
+};
+$("setTheme").onchange = async () => {
+  const theme = $("setTheme").value;
+  if (window.bddmSetTheme) window.bddmSetTheme(theme); // this window at once
+  try {
+    const s = await api("/api/settings", { theme });
+    $("setTheme").value = s.theme || "system";
+    toast("Theme saved", theme === "system" ? "BDDM follows the Windows light or dark mode." : "Every BDDM window uses the " + theme + " theme.", "ok");
+  } catch (e) { toast("Could not save the theme", e.message, "bad"); }
 };
 $("setCookies").onchange = async () => {
   try {

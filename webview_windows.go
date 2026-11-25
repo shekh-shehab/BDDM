@@ -85,6 +85,7 @@ type webHost struct {
 	ready    bool
 	shown    bool
 	active   bool // has been the active window at least once
+	pageDark int  // 0 = page has not said yet, 1 = light, 2 = dark
 }
 
 var host *webHost
@@ -173,7 +174,7 @@ func (h *webHost) create(title string, r windowRect) uintptr {
 		uintptr(int32(r.X)), uintptr(int32(r.Y)), uintptr(int32(r.W)), uintptr(int32(r.H)), 0, 0, hinst, 0)
 	h.hwnd = hwnd
 	if hwnd != 0 {
-		setTitleBarDark(hwnd, windowsAppsUseDark())
+		setTitleBarDark(hwnd, themeIsDark(uiTheme(), windowsAppsUseDark()))
 		if big != 0 {
 			procSendMessageW.Call(hwnd, wmSetIcon, 1, big)
 		}
@@ -202,6 +203,17 @@ func (h *webHost) onMessage(m string) {
 	switch cmd, arg := parseHostMessage(m); cmd {
 	case "close":
 		procPostMessageW.Call(h.hwnd, wmClose, 0, 0)
+	case "theme":
+		// The page knows the chosen theme (System / Light / Dark) and
+		// tells us whenever it changes, so the title bar matches.
+		dark := arg == themeDark
+		if dark {
+			h.pageDark = 2
+		} else {
+			h.pageDark = 1
+		}
+		setTitleBarDark(h.hwnd, dark)
+		refreshFrame(h.hwnd)
 	case "title":
 		if arg != "" {
 			p, _ := syscall.UTF16PtrFromString(arg)
@@ -258,7 +270,9 @@ func hostWndProc(hwnd, msg, wp, lp uintptr) uintptr {
 			}
 		}
 	case wmSettingChange:
-		setTitleBarDark(hwnd, windowsAppsUseDark())
+		if h.pageDark == 0 {
+			setTitleBarDark(hwnd, themeIsDark(uiTheme(), windowsAppsUseDark()))
+		}
 	case wmTimer:
 		if wp == hostShowTimerID {
 			h.show()
@@ -371,7 +385,7 @@ func launchWindowHost(u, kind string, r windowRect, fallback func() error) error
 	if exe == "" {
 		return fallback()
 	}
-	cmd := exec.Command(exe, windowHostArgs(u, kind, r)...)
+	cmd := exec.Command(exe, append(windowHostArgs(u, kind, r), windowHostThemeArgs(uiTheme())...)...)
 	var err error
 	withForeground(func() { err = cmd.Start() })
 	if err != nil {

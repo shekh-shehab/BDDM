@@ -37,9 +37,11 @@ func main() {
 	windowURL := flag.String("window", "", "internal: show one BDDM page in a WebView2 window")
 	windowKind := flag.String("window-kind", windowKindPage, "internal: main, page, popup or tray")
 	windowRectArg := flag.String("window-rect", "", "internal: x,y,w,h in physical pixels")
+	windowTheme := flag.String("window-theme", themeSystem, "internal: system, light or dark")
 	flag.Parse()
 	if *windowURL != "" { // helper process for one BDDM window (bug 76)
 		setupWindowHostLog()
+		currentTheme.Store(normalizeTheme(*windowTheme))
 		os.Exit(runWindowHost(*windowURL, *windowKind, *windowRectArg))
 	}
 	appURL := "http://127.0.0.1:" + port

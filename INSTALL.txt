@@ -115,6 +115,11 @@ itself. Use the "Download with BDDM" button in the corner of the video, or
 click the BDDM toolbar icon (its badge shows how many videos were found).
 After updating, click the reload button of BDDM on the extensions page.
 
+New Theme option: BDDM > Settings > Theme lets you choose System (follow
+the Windows light or dark mode, the default), Light or Dark. The choice
+applies at once to every BDDM window, including the title bar, and is
+remembered.
+
 4. What was new in 1.5.3
 -----------------------
 The Download Video window, and the other small windows (Download File Info,

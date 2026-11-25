@@ -47,3 +47,16 @@ func setTitleBarDark(hwnd uintptr, dark bool) {
 		procDwmSetWindowAttribute.Call(hwnd, dwmwaUseImmersiveDarkModeOld, uintptr(unsafe.Pointer(&v)), 4)
 	}
 }
+
+// refreshFrame repaints the title bar after its colour changed.
+func refreshFrame(hwnd uintptr) {
+	if hwnd == 0 {
+		return
+	}
+	const (
+		swpNoSize       = 0x0001
+		swpNoMove       = 0x0002
+		swpFrameChanged = 0x0020
+	)
+	procSetWindowPos.Call(hwnd, 0, 0, 0, 0, 0, swpNoMove|swpNoSize|swpNoZOrder|swpNoActivate|swpFrameChanged)
+}

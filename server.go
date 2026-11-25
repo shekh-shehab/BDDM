@@ -368,6 +368,10 @@ func newServer(m *Manager, port string, quit func(), upd *Updater) http.Handler 
 	mux.HandleFunc("GET /api/settings", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, m.Settings())
 	})
+	mux.HandleFunc("GET /api/theme", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		writeJSON(w, 200, map[string]string{"theme": normalizeTheme(m.Settings().Theme)})
+	})
 	mux.HandleFunc("POST /api/settings", func(w http.ResponseWriter, r *http.Request) {
 		st := m.Settings() // fields the page does not send keep their value
 		if err := json.NewDecoder(r.Body).Decode(&st); err != nil {

@@ -120,6 +120,12 @@ func windowHostArgs(u, kind string, r windowRect) []string {
 	return []string{"-window", u, "-window-kind", kind, "-window-rect", r.String()}
 }
 
+// windowHostThemeArgs passes the saved theme, so the title bar has the
+// right colour before the page loads.
+func windowHostThemeArgs(theme string) []string {
+	return []string{"-window-theme", normalizeTheme(theme)}
+}
+
 // localDataDir is %LOCALAPPDATA%\BDDM (browser caches belong there, not in
 // the roaming profile).
 func localDataDir() string {
@@ -320,6 +326,10 @@ func parseHostMessage(m string) (cmd, arg string) {
 			t = t[:200]
 		}
 		return "title", t
+	case m == "bddm:theme:dark":
+		return "theme", themeDark
+	case m == "bddm:theme:light":
+		return "theme", themeLight
 	}
 	return "", ""
 }

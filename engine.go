@@ -113,6 +113,9 @@ type Settings struct {
 	// It is pre-filled the next time. If it is missing, the usual default
 	// download folder is used instead.
 	LastTorrentDir string `json:"lastTorrentDir,omitempty"`
+	// Theme of every BDDM window: "system" (follow Windows, default),
+	// "light" or "dark" (item 78).
+	Theme string `json:"theme"`
 }
 
 func defaultSettings() Settings {
@@ -121,7 +124,7 @@ func defaultSettings() Settings {
 		dir = filepath.Join(home, "Downloads", "BDDM")
 	}
 	return Settings{DownloadDir: dir, Parts: defaultParts, MaxActive: defaultMaxActive, Notifications: true, AskCaptured: true,
-		Categories: defaultCategories(), ResumeOnStart: true, CheckUpdates: true, YieldToOther: true}
+		Categories: defaultCategories(), ResumeOnStart: true, CheckUpdates: true, YieldToOther: true, Theme: themeSystem}
 }
 
 func (s *Settings) fix() {
@@ -148,6 +151,8 @@ func (s *Settings) fix() {
 		s.CookiesBrowser = ""
 	}
 	cookiesBrowser.Store(s.CookiesBrowser)
+	s.Theme = normalizeTheme(s.Theme)
+	currentTheme.Store(s.Theme)
 	s.HTTPDownloadLimit = clampLimit(s.HTTPDownloadLimit)
 	s.TorrentDownloadLimit = clampLimit(s.TorrentDownloadLimit)
 	s.TorrentUploadLimit = clampLimit(s.TorrentUploadLimit)
