@@ -1,10 +1,14 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestWindowKindForURL(t *testing.T) {
@@ -55,15 +59,72 @@ func TestWindowTitleForURL(t *testing.T) {
 }
 
 func TestIsLocalBDDMURL(t *testing.T) {
-	for _, u := range []string{"http://127.0.0.1:" + port + "/", "http://localhost:" + port + "/video.html?id=1"} {
+	for _, u := range []string{
+		"http://127.0.0.1:" + port,
+		"http://127.0.0.1:" + port + "/",
+		"http://127.0.0.1:" + port + "/?tab=settings&scheme=dark",
+		"http://127.0.0.1:" + port + "/video.html?id=abc123&scheme=light",
+		"http://127.0.0.1:" + port + "/tray.html",
+	} {
 		if !isLocalBDDMURL(u) {
 			t.Errorf("expected local %q", u)
 		}
 	}
-	for _, u := range []string{"https://127.0.0.1:" + port + "/", "http://127.0.0.1:1/", "http://example.com:" + port + "/", "file:///C:/x.html", "javascript:alert(1)", ""} {
+	for _, u := range []string{
+		"http://localhost:" + port + "/video.html?id=1",
+		"http://[::1]:" + port + "/",
+		"https://127.0.0.1:" + port + "/",
+		"http://127.0.0.1:1/",
+		"http://example.com:" + port + "/",
+		"file:///C:/x.html",
+		"javascript:alert(1)",
+		"",
+	} {
 		if isLocalBDDMURL(u) {
 			t.Errorf("did not expect local %q", u)
 		}
+	}
+}
+
+func TestWebViewDevToolsAndErrorStatus(t *testing.T) {
+	setWebViewDevTools(false)
+	t.Setenv("BDDM_DEVTOOLS", "")
+	if webviewDevToolsEnabled() {
+		t.Fatal("devtools should be off by default")
+	}
+	t.Setenv("BDDM_DEVTOOLS", "1")
+	if !webviewDevToolsEnabled() {
+		t.Fatal("BDDM_DEVTOOLS=1 should enable devtools")
+	}
+	t.Setenv("BDDM_DEVTOOLS", "")
+	setWebViewDevTools(true)
+	if !webviewDevToolsEnabled() {
+		t.Fatal("-devtools flag should enable devtools")
+	}
+	setWebViewDevTools(false)
+	setWebViewTestMode(false)
+	t.Setenv("BDDM_WV2_TEST", "")
+	if webviewTestModeEnabled() {
+		t.Fatal("wv2test should be off by default")
+	}
+	t.Setenv("BDDM_WV2_TEST", "1")
+	if !webviewTestModeEnabled() {
+		t.Fatal("BDDM_WV2_TEST=1 should enable test mode")
+	}
+	t.Setenv("BDDM_WV2_TEST", "")
+	setWebViewTestMode(true)
+	if !webviewTestModeEnabled() {
+		t.Fatal("-wv2test should enable test mode")
+	}
+	setWebViewTestMode(false)
+	if !strings.Contains(webviewTestHTML, "color:#d00") || !strings.Contains(webviewTestHTML, ">test<") {
+		t.Fatal("webviewTestHTML missing red test heading")
+	}
+	if got := webErrorStatusName(12); got != "CannotConnect" {
+		t.Fatalf("webErrorStatusName(12) = %q", got)
+	}
+	if got := webErrorStatusName(14); got != "OperationCanceled" {
+		t.Fatalf("webErrorStatusName(14) = %q", got)
 	}
 }
 
@@ -104,6 +165,12 @@ func TestWebViewDataDirs(t *testing.T) {
 	}
 	if fb := edgeFallbackDir("app"); !strings.Contains(fb, filepath.Join("BDDM", "edge-fallback")) {
 		t.Fatalf("edgeFallbackDir = %q", fb)
+	}
+	if ld := webviewLogDir(); !strings.HasSuffix(ld, filepath.Join("Local", "BDDM", "logs")) {
+		t.Fatalf("webviewLogDir = %q", ld)
+	}
+	if lp := webviewLogPath(); !strings.HasSuffix(lp, filepath.Join("Local", "BDDM", "logs", "window-host.log")) {
+		t.Fatalf("webviewLogPath = %q", lp)
 	}
 }
 
@@ -197,8 +264,10 @@ func TestRestoreMainRect(t *testing.T) {
 
 func TestIsBDDMHostWindow(t *testing.T) {
 	self := `C:\Users\x\AppData\Local\Programs\BDDM\BDDM.exe`
-	if !isBDDMHostWindow(bddmWebViewClass, `C:\Users\x\AppData\Local\Programs\BDDM\BDDM.exe`, self) {
-		t.Fatal("own WebView2 window not recognised")
+	for _, cls := range []string{goWebView2Class, bddmWebViewClass} {
+		if !isBDDMHostWindow(cls, self, self) {
+			t.Fatalf("own WebView2 window (%s) not recognised", cls)
+		}
 	}
 	if isBDDMHostWindow("Chrome_WidgetWin_1", self, self) {
 		t.Fatal("other window classes are not BDDM host windows")
@@ -212,13 +281,16 @@ func TestIsBDDMHostWindow(t *testing.T) {
 }
 
 func TestWebViewInitScriptAndMessages(t *testing.T) {
-	for _, want := range []string{"window.close = function", "bddm:close", "bddm:title:", "chrome.webview.postMessage", "document.title"} {
+	for _, want := range []string{"window.close = function", "bddm:close", "bddm:ready", "bddm:title:", "chrome.webview.postMessage", "document.title"} {
 		if !strings.Contains(webviewInitScript, want) {
 			t.Errorf("init script missing %q", want)
 		}
 	}
 	if c, _ := parseHostMessage("bddm:close"); c != "close" {
 		t.Fatal("close message")
+	}
+	if c, _ := parseHostMessage("bddm:ready"); c != "ready" {
+		t.Fatal("ready message")
 	}
 	if c, a := parseHostMessage("bddm:title:Download Video - Song"); c != "title" || a != "Download Video - Song" {
 		t.Fatalf("title message %q %q", c, a)
@@ -228,5 +300,61 @@ func TestWebViewInitScriptAndMessages(t *testing.T) {
 	}
 	if c, _ := parseHostMessage(`{"id":1,"method":"x"}`); c != "" {
 		t.Fatal("other messages are ignored")
+	}
+}
+
+func TestWaitForServerReady(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/ping" {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"app":"BDDM"}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	if !waitForServerReady(srv.URL+"/?tab=settings", time.Second) {
+		t.Fatal("expected server ready")
+	}
+	srv.Close()
+	if waitForServerReady(srv.URL+"/", 150*time.Millisecond) {
+		t.Fatal("closed server must time out")
+	}
+	if waitForServerReady("not-a-url", 50*time.Millisecond) {
+		t.Fatal("bad URL must return false")
+	}
+}
+
+func TestWebViewInitScriptRunsCleanly(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("no node")
+	}
+	prelude := strings.Join([]string{
+		"const posted = [];",
+		"global.window = {",
+		"  chrome: { webview: { postMessage: (m) => posted.push(m) } },",
+		"  addEventListener: (ev, fn) => { if (ev === 'load') fn(); },",
+		"  MutationObserver: function() { return { observe: () => {} }; },",
+		"};",
+		"global.MutationObserver = global.window.MutationObserver;",
+		"global.document = {",
+		"  title: 'BDDM - Download Manager',",
+		"  body: null,",
+		"  addEventListener: (ev, fn) => { if (ev === 'DOMContentLoaded') fn(); },",
+		"  querySelector: () => ({}),",
+		"};",
+		"global.setInterval = () => 1;",
+	}, "\n")
+	tail := strings.Join([]string{
+		"global.document.body = { children: [{}], innerText: 'Downloads' };",
+		webviewInitScript,
+		"window.close();",
+		"if (!posted.includes('bddm:close')) throw new Error('missing bddm:close: ' + JSON.stringify(posted));",
+		"if (!posted.some(m => m.startsWith('bddm:title:'))) throw new Error('missing title: ' + JSON.stringify(posted));",
+		"if (!posted.includes('bddm:ready')) throw new Error('missing ready: ' + JSON.stringify(posted));",
+	}, "\n")
+	cmd := exec.Command(node, "-e", prelude+"\n"+webviewInitScript+"\n"+tail)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("init script failed: %v\n%s", err, out)
 	}
 }

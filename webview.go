@@ -9,11 +9,14 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
+	"time"
 )
 
 // Window kinds passed to the helper process.
@@ -25,7 +28,8 @@ const (
 )
 
 const (
-	bddmWebViewClass = "BDDMWebView"
+	bddmWebViewClass    = "BDDMWebView"
+	goWebView2Class     = "webview"
 	// Evergreen WebView2 runtime bootstrapper (Microsoft).
 	webview2RuntimeURL = "https://go.microsoft.com/fwlink/p/?LinkId=2124703"
 	webview2NoticeText = "BDDM needs the Microsoft Edge WebView2 Runtime to show its windows.\n\n" +
@@ -80,14 +84,14 @@ func windowTitleForURL(u string) string {
 	return "BDDM - Download Manager"
 }
 
-// isLocalBDDMURL keeps the helper on BDDM's own pages.
+// isLocalBDDMURL keeps the helper on BDDM's own pages (IPv4 127.0.0.1 only,
+// never localhost/::1, with the exact BDDM port and any path or query string).
 func isLocalBDDMURL(raw string) bool {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil || u.Scheme != "http" {
 		return false
 	}
-	h := u.Hostname()
-	return (h == "127.0.0.1" || h == "localhost") && u.Port() == port
+	return u.Hostname() == "127.0.0.1" && u.Port() == port
 }
 
 // windowRect is a physical-pixel window rectangle.
@@ -126,6 +130,68 @@ func windowHostThemeArgs(theme string) []string {
 	return []string{"-window-theme", normalizeTheme(theme)}
 }
 
+var webviewDevTools atomic.Bool
+
+func setWebViewDevTools(on bool) { webviewDevTools.Store(on) }
+
+// webviewDevToolsEnabled is true when -devtools or BDDM_DEVTOOLS=1 is set.
+func webviewDevToolsEnabled() bool {
+	if webviewDevTools.Load() {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("BDDM_DEVTOOLS"))) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
+}
+
+var webviewTestMode atomic.Bool
+
+func setWebViewTestMode(on bool) { webviewTestMode.Store(on) }
+
+// webviewTestModeEnabled is true when -wv2test or BDDM_WV2_TEST=1 is set.
+// It renders an inline red "test" heading via NavigateToString so layout
+// problems can be told apart from HTTP/navigation ones.
+func webviewTestModeEnabled() bool {
+	if webviewTestMode.Load() {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("BDDM_WV2_TEST"))) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
+}
+
+const webviewTestHTML = "<!doctype html><html><head><meta charset=\"utf-8\"><title>BDDM WebView2 Test</title></head><body style=\"margin:24px;font-family:'Segoe UI',sans-serif;background:#fff;color:#111\"><h1 style=\"color:#d00;margin:0 0 8px\">test</h1><p>BDDM WebView2 NavigateToString OK</p></body></html>"
+
+func webErrorStatusName(status int32) string {
+	names := [...]string{
+		"Unknown",
+		"CertificateCommonNameIsIncorrect",
+		"CertificateExpired",
+		"ClientCertificateContainsErrors",
+		"CertificateRevoked",
+		"CertificateIsInvalid",
+		"ServerUnreachable",
+		"Timeout",
+		"ErrorHttpInvalidServerResponse",
+		"ConnectionAborted",
+		"ConnectionReset",
+		"Disconnected",
+		"CannotConnect",
+		"HostNameNotResolved",
+		"OperationCanceled",
+		"RedirectFailed",
+		"UnexpectedError",
+	}
+	if status >= 0 && int(status) < len(names) {
+		return names[status]
+	}
+	return fmt.Sprintf("Status(%d)", status)
+}
+
 // localDataDir is %LOCALAPPDATA%\BDDM (browser caches belong there, not in
 // the roaming profile).
 func localDataDir() string {
@@ -143,6 +209,37 @@ func localDataDir() string {
 
 // webviewDataDir is the WebView2 user-data folder shared by all BDDM windows.
 func webviewDataDir() string { return filepath.Join(localDataDir(), "webview2") }
+
+// webviewLogDir is %LOCALAPPDATA%\BDDM\logs for WebView2 window host logs.
+func webviewLogDir() string { return filepath.Join(localDataDir(), "logs") }
+
+// webviewLogPath is the WebView2 helper log file.
+func webviewLogPath() string { return filepath.Join(webviewLogDir(), "window-host.log") }
+
+// waitForServerReady waits until the local BDDM HTTP server answers /api/ping
+// on 127.0.0.1 (never localhost/::1).
+func waitForServerReady(rawURL string, timeout time.Duration) bool {
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || u.Hostname() != "127.0.0.1" || u.Port() == "" {
+		return false
+	}
+	pingURL := "http://127.0.0.1:" + u.Port() + "/api/ping"
+	client := &http.Client{Timeout: 400 * time.Millisecond}
+	deadline := time.Now().Add(timeout)
+	for {
+		resp, err := client.Get(pingURL)
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				return true
+			}
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
 
 // edgeFallbackDir is the Edge profile used only when WebView2 is missing.
 func edgeFallbackDir(kind string) string {
@@ -281,7 +378,7 @@ func maxInt(a, b int) int {
 // isBDDMHostWindow reports whether a top-level window is one of BDDM's own
 // WebView2 windows (class BDDMWebView in a BDDM.exe process).
 func isBDDMHostWindow(class, exe, selfExe string) bool {
-	if class != bddmWebViewClass || exe == "" {
+	if (class != bddmWebViewClass && class != goWebView2Class) || exe == "" {
 		return false
 	}
 	base := func(p string) string {
@@ -300,19 +397,36 @@ func isBDDMHostWindow(class, exe, selfExe string) bool {
 // BDDM window, and the window title follows document.title.
 const webviewInitScript = `(function () {
   var post = function (m) { try { window.chrome.webview.postMessage(m); } catch (e) {} };
-  window.close = function () { post("bddm:close"); };
+  window.close = function () {
+    if (window.bddmHostClose) { try { window.bddmHostClose(); return; } catch (e) {} }
+    post("bddm:close");
+  };
+  var sentReady = false;
+  var sendReady = function () {
+    if (sentReady) return;
+    if (document.body && (document.body.children.length > 0 || (document.body.innerText || "").trim().length > 0)) {
+      sentReady = true;
+      if (window.bddmHostStage) { try { window.bddmHostStage("dom_ready"); } catch (e) {} }
+      post("bddm:ready");
+    }
+  };
   var last = "";
   var sendTitle = function () {
     var t = document.title || "";
-    if (t && t !== last) { last = t; post("bddm:title:" + t); }
+    if (t && t !== last) {
+      last = t;
+      if (window.bddmHostTitle) { try { window.bddmHostTitle(t); } catch (e) {} }
+      post("bddm:title:" + t);
+    }
   };
   document.addEventListener("DOMContentLoaded", function () {
     sendTitle();
+    sendReady();
     var el = document.querySelector("title");
     if (el && window.MutationObserver) new MutationObserver(sendTitle).observe(el, { childList: true, characterData: true, subtree: true });
   });
-  window.addEventListener("load", sendTitle);
-  setInterval(sendTitle, 1000);
+  window.addEventListener("load", function () { sendTitle(); sendReady(); });
+  setInterval(function () { sendTitle(); sendReady(); }, 500);
 })();`
 
 // parseHostMessage decodes a message posted by webviewInitScript.
@@ -320,6 +434,8 @@ func parseHostMessage(m string) (cmd, arg string) {
 	switch {
 	case m == "bddm:close":
 		return "close", ""
+	case m == "bddm:ready":
+		return "ready", ""
 	case strings.HasPrefix(m, "bddm:title:"):
 		t := strings.TrimSpace(strings.TrimPrefix(m, "bddm:title:"))
 		if len(t) > 200 {

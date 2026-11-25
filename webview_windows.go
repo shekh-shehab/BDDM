@@ -13,7 +13,7 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/jchv/go-webview2/pkg/edge"
+	"github.com/jchv/go-webview2"
 	"github.com/jchv/go-webview2/webviewloader"
 )
 
@@ -21,15 +21,12 @@ const (
 	wsOverlappedWindow = 0x00CF0000
 	wsPopup            = 0x80000000
 	wsBorder           = 0x00800000
+	wsClipChildren     = 0x02000000
 	wsExToolWindow     = 0x00000080
 	wsExTopmost        = 0x00000008
 
-	wmSize          = 0x0005
-	wmMove          = 0x0003
 	wmActivate      = 0x0006
-	wmSetFocus      = 0x0007
 	wmClose         = 0x0010
-	wmTimer         = 0x0113
 	wmGetMinMaxInfo = 0x0024
 	wmExitSizeMove  = 0x0232
 	wmSettingChange = 0x001A
@@ -37,29 +34,34 @@ const (
 	wmSetIcon       = 0x0080
 	waInactive      = 0
 
-	swpNoZOrder   = 0x0004
-	swpNoActivate = 0x0010
+	gwlStyle   = ^uintptr(15) // GWL_STYLE (-16)
+	gwlExStyle = ^uintptr(19) // GWL_EXSTYLE (-20)
+	gwlpProc   = ^uintptr(3)  // GWLP_WNDPROC (-4)
 
-	mbYesNo          = 0x00000004
-	mbIconInfo       = 0x00000040
-	mbTopmost        = 0x00040000
-	mbSetForeground  = 0x00010000
-	idYes            = 6
-	coinitApartment  = 0x2
-	hostShowTimerID  = 1
-	hostShowFallback = 1500 // ms: show even if the page never finishes loading
+	swpNoZOrder     = 0x0004
+	swpNoActivate   = 0x0010
+	swpFrameChanged = 0x0020
+	swpShowWindow   = 0x0040
+
+	mbYesNo         = 0x00000004
+	mbIconInfo      = 0x00000040
+	mbTopmost       = 0x00040000
+	mbSetForeground = 0x00010000
+	idYes           = 6
+	coinitApartment = 0x2
 )
 
 var (
-	procExtractIconExW = shell32.NewProc("ExtractIconExW")
-	procSetWindowTextW = user32.NewProc("SetWindowTextW")
-	procUpdateWindow   = user32.NewProc("UpdateWindow")
-	procSetTimer       = user32.NewProc("SetTimer")
-	procKillTimer      = user32.NewProc("KillTimer")
-	procIsZoomed       = user32.NewProc("IsZoomed")
-	procSendMessageW   = user32.NewProc("SendMessageW")
-	procMessageBoxW    = user32.NewProc("MessageBoxW")
-	procLoadCursorW    = user32.NewProc("LoadCursorW")
+	procExtractIconExW   = shell32.NewProc("ExtractIconExW")
+	procSetWindowTextW   = user32.NewProc("SetWindowTextW")
+	procIsZoomed         = user32.NewProc("IsZoomed")
+	procSendMessageW     = user32.NewProc("SendMessageW")
+	procMessageBoxW      = user32.NewProc("MessageBoxW")
+	procGetWindowLongPtr = user32.NewProc("GetWindowLongPtrW")
+	procGetWindowLong    = user32.NewProc("GetWindowLongW")
+	procSetWindowLongPtr = user32.NewProc("SetWindowLongPtrW")
+	procSetWindowLong    = user32.NewProc("SetWindowLongW")
+	procCallWindowProcW  = user32.NewProc("CallWindowProcW")
 
 	selfExeOnce sync.Once
 	selfExe     string
@@ -74,18 +76,38 @@ func selfExePath() string {
 	return selfExe
 }
 
+func getWindowLongPtr(hwnd, idx uintptr) uintptr {
+	if procGetWindowLongPtr.Find() == nil {
+		r, _, _ := procGetWindowLongPtr.Call(hwnd, idx)
+		return r
+	}
+	r, _, _ := procGetWindowLong.Call(hwnd, idx)
+	return r
+}
+
+func setWindowLongPtr(hwnd, idx, val uintptr) uintptr {
+	if procSetWindowLongPtr.Find() == nil {
+		r, _, _ := procSetWindowLongPtr.Call(hwnd, idx, val)
+		return r
+	}
+	r, _, _ := procSetWindowLong.Call(hwnd, idx, val)
+	return r
+}
+
 // ---------------------------------------------------------------------------
-// Helper process: one WebView2 window.
+// Helper process: one WebView2 window via go-webview2 NewWithOptions.
 // ---------------------------------------------------------------------------
 
 type webHost struct {
-	hwnd     uintptr
-	kind     string
-	chromium *edge.Chromium
-	ready    bool
-	shown    bool
-	active   bool // has been the active window at least once
-	pageDark int  // 0 = page has not said yet, 1 = light, 2 = dark
+	hwnd        uintptr
+	kind        string
+	url         string
+	wv          webview2.WebView
+	origWndProc uintptr
+	ready       bool
+	active      bool // has been the active window at least once
+	pageDark    int  // 0 = page has not said yet, 1 = light, 2 = dark
+	domReady    bool
 }
 
 var host *webHost
@@ -104,77 +126,76 @@ func runWindowHost(u, kind, rectArg string) int {
 	}
 	procCoInitializeEx.Call(0, coinitApartment)
 	setCurrentProcessAppUserModelID()
-	_ = os.MkdirAll(webviewDataDir(), 0755)
 
-	host = &webHost{kind: kind}
-	if host.create(windowTitleForURL(u), r) == 0 {
-		return 3
+	dataDir := webviewDataDir()
+	if err := os.MkdirAll(dataDir, 0755); err != nil {
+		log.Printf("window host: mkdir %s: %v", dataDir, err)
 	}
-	c := edge.NewChromium()
-	c.DataPath = webviewDataDir()
-	c.MessageCallback = host.onMessage
-	c.NavigationCompletedCallback = func(*edge.ICoreWebView2, *edge.ICoreWebView2NavigationCompletedEventArgs) {
-		host.show()
-	}
-	host.chromium = c
-	if !c.Embed(host.hwnd) {
-		log.Print("window host: WebView2 could not start")
+	devtools := webviewDevToolsEnabled()
+	wv2test := webviewTestModeEnabled()
+	ver, verErr := webviewloader.GetInstalledVersion()
+	log.Printf("window host: stage=1_start version=%s kind=%s url=%s rect=%s data=%s devtools=%v wv2test=%v webview2=%q err=%v",
+		appVersion, kind, u, r, dataDir, devtools, wv2test, ver, verErr)
+
+	title := windowTitleForURL(u)
+	log.Printf("window host: stage=2_new_with_options Debug=%v DataPath=%s", devtools, dataDir)
+	w := webview2.NewWithOptions(webview2.WebViewOptions{
+		Debug:     devtools, // false by default in release builds; true only with BDDM_DEVTOOLS=1 / -devtools
+		DataPath:  dataDir,
+		AutoFocus: true,
+		WindowOptions: webview2.WindowOptions{
+			Title:  title,
+			Width:  uint(r.W),
+			Height: uint(r.H),
+			IconId: 1,
+			Center: false,
+		},
+	})
+	if w == nil || uintptr(w.Window()) == 0 {
+		log.Printf("window host: stage=2_new_with_options failed for %s (%s)", u, kind)
 		return 4
 	}
-	host.ready = true
-	if s, err := c.GetSettings(); err == nil {
-		_ = s.PutAreDefaultContextMenusEnabled(false)
-		_ = s.PutAreDevToolsEnabled(false)
-		_ = s.PutIsStatusBarEnabled(false)
-		_ = s.PutIsZoomControlEnabled(false)
-		_ = s.PutAreBrowserAcceleratorKeysEnabled(false)
-	}
-	c.Init(webviewInitScript)
-	c.Resize()
-	c.Navigate(u)
-	procSetTimer.Call(host.hwnd, hostShowTimerID, hostShowFallback, 0)
 
-	var msg winMsg
-	for {
-		ret, _, _ := procGetMessageW.Call(uintptr(unsafe.Pointer(&msg)), 0, 0, 0)
-		if int32(ret) <= 0 {
-			break
-		}
-		procTranslateMessage.Call(uintptr(unsafe.Pointer(&msg)))
-		procDispatchMessageW.Call(uintptr(unsafe.Pointer(&msg)))
+	hwnd := uintptr(w.Window())
+	host = &webHost{
+		hwnd: hwnd,
+		kind: kind,
+		url:  u,
+		wv:   w,
 	}
+	host.configureWindow(r)
+	var cr winRect
+	procGetClientRect.Call(hwnd, uintptr(unsafe.Pointer(&cr)))
+	log.Printf("window host: stage=3_window_ready hwnd=0x%x client=(%d,%d,%d,%d)", hwnd, cr.left, cr.top, cr.right, cr.bottom)
+
+	host.bindAndInit()
+	log.Printf("window host: stage=4_init_bindings")
+
+	if wv2test {
+		log.Printf("window host: stage=5_wv2_test calling SetHtml (red test)")
+		w.SetHtml(webviewTestHTML)
+	} else {
+		ready := waitForServerReady(u, 3*time.Second)
+		log.Printf("window host: stage=5_navigate serverReady=%v url=%s", ready, u)
+		w.Navigate(u)
+	}
+
+	host.ready = true
+	log.Printf("window host: stage=6_run_loop")
+	w.Run()
+	log.Printf("window host: stage=8_closed domReady=%v", host.domReady)
 	return 0
 }
 
-func (h *webHost) create(title string, r windowRect) uintptr {
-	hinst, _, _ := procGetModuleHandleW.Call(0)
-	var big, small uintptr
+func (h *webHost) configureWindow(r windowRect) {
+	hwnd := h.hwnd
+	dark := themeIsDark(uiTheme(), windowsAppsUseDark())
+	setTitleBarDark(hwnd, dark)
+
 	if exe := selfExePath(); exe != "" {
+		var big, small uintptr
 		p, _ := syscall.UTF16PtrFromString(exe)
 		procExtractIconExW.Call(uintptr(unsafe.Pointer(p)), 0, uintptr(unsafe.Pointer(&big)), uintptr(unsafe.Pointer(&small)), 1)
-	}
-	cls, _ := syscall.UTF16PtrFromString(bddmWebViewClass)
-	cursor, _, _ := procLoadCursorW.Call(0, 32512) // IDC_ARROW
-	wc := wndClassEx{
-		lpfnWndProc:   syscall.NewCallback(hostWndProc),
-		hInstance:     hinst,
-		hIcon:         big,
-		hCursor:       cursor,
-		hIconSm:       small,
-		lpszClassName: cls,
-	}
-	wc.cbSize = uint32(unsafe.Sizeof(wc))
-	procRegisterClassExW.Call(uintptr(unsafe.Pointer(&wc)))
-	style, ex := uintptr(wsOverlappedWindow), uintptr(0)
-	if h.kind == windowKindTray {
-		style, ex = wsPopup|wsBorder, wsExToolWindow|wsExTopmost
-	}
-	t, _ := syscall.UTF16PtrFromString(title)
-	hwnd, _, _ := procCreateWindowExW.Call(ex, uintptr(unsafe.Pointer(cls)), uintptr(unsafe.Pointer(t)), style,
-		uintptr(int32(r.X)), uintptr(int32(r.Y)), uintptr(int32(r.W)), uintptr(int32(r.H)), 0, 0, hinst, 0)
-	h.hwnd = hwnd
-	if hwnd != 0 {
-		setTitleBarDark(hwnd, themeIsDark(uiTheme(), windowsAppsUseDark()))
 		if big != 0 {
 			procSendMessageW.Call(hwnd, wmSetIcon, 1, big)
 		}
@@ -182,31 +203,39 @@ func (h *webHost) create(title string, r windowRect) uintptr {
 			procSendMessageW.Call(hwnd, wmSetIcon, 0, small)
 		}
 	}
-	return hwnd
+
+	if h.kind == windowKindTray {
+		setWindowLongPtr(hwnd, gwlStyle, wsPopup|wsBorder|wsClipChildren)
+		setWindowLongPtr(hwnd, gwlExStyle, wsExToolWindow|wsExTopmost)
+		procSetWindowPos.Call(hwnd, hwndTopmost, uintptr(int32(r.X)), uintptr(int32(r.Y)), uintptr(int32(r.W)), uintptr(int32(r.H)), swpFrameChanged|swpShowWindow)
+	} else {
+		st := getWindowLongPtr(hwnd, gwlStyle)
+		setWindowLongPtr(hwnd, gwlStyle, st|wsClipChildren)
+		procSetWindowPos.Call(hwnd, 0, uintptr(int32(r.X)), uintptr(int32(r.Y)), uintptr(int32(r.W)), uintptr(int32(r.H)), swpNoZOrder|swpFrameChanged|swpShowWindow)
+	}
+
+	// Subclass NewWithOptions's wndproc for BDDM sizing, theme, DPI and tray blur,
+	// chaining all other messages (including WM_SIZE/WM_DESTROY) to go-webview2.
+	h.origWndProc = setWindowLongPtr(hwnd, gwlpProc, syscall.NewCallback(hostSubclassProc))
+	setForegroundWindow(hwnd)
 }
 
-func (h *webHost) show() {
-	if h.shown || h.hwnd == 0 {
-		return
-	}
-	h.shown = true
-	procKillTimer.Call(h.hwnd, hostShowTimerID)
-	showWindow(h.hwnd, swShow)
-	procUpdateWindow.Call(h.hwnd)
-	setForegroundWindow(h.hwnd)
-	if h.chromium != nil {
-		h.chromium.Focus()
-	}
-}
-
-func (h *webHost) onMessage(m string) {
-	switch cmd, arg := parseHostMessage(m); cmd {
-	case "close":
+func (h *webHost) bindAndInit() {
+	_ = h.wv.Bind("bddmHostClose", func() {
 		procPostMessageW.Call(h.hwnd, wmClose, 0, 0)
-	case "theme":
-		// The page knows the chosen theme (System / Light / Dark) and
-		// tells us whenever it changes, so the title bar matches.
-		dark := arg == themeDark
+	})
+	_ = h.wv.Bind("bddmHostTitle", func(title string) {
+		if title == "" {
+			return
+		}
+		if len(title) > 200 {
+			title = title[:200]
+		}
+		p, _ := syscall.UTF16PtrFromString(title)
+		procSetWindowTextW.Call(h.hwnd, uintptr(unsafe.Pointer(p)))
+	})
+	_ = h.wv.Bind("bddmHostTheme", func(eff string) {
+		dark := eff == themeDark
 		if dark {
 			h.pageDark = 2
 		} else {
@@ -214,12 +243,14 @@ func (h *webHost) onMessage(m string) {
 		}
 		setTitleBarDark(h.hwnd, dark)
 		refreshFrame(h.hwnd)
-	case "title":
-		if arg != "" {
-			p, _ := syscall.UTF16PtrFromString(arg)
-			procSetWindowTextW.Call(h.hwnd, uintptr(unsafe.Pointer(p)))
+	})
+	_ = h.wv.Bind("bddmHostStage", func(stage string) {
+		if stage == "dom_ready" && !h.domReady {
+			h.domReady = true
+			log.Printf("window host: stage=7_dom_ready kind=%s", h.kind)
 		}
-	}
+	})
+	h.wv.Init(webviewInitScript)
 }
 
 func (h *webHost) saveMainSize() {
@@ -238,46 +269,26 @@ type minMaxInfo struct {
 	reserved, maxSize, maxPosition, minTrackSize, maxTrackSize winPoint
 }
 
-func hostWndProc(hwnd, msg, wp, lp uintptr) uintptr {
+func hostSubclassProc(hwnd, msg, wp, lp uintptr) uintptr {
 	h := host
-	if h == nil || hwnd != h.hwnd {
+	if h == nil || hwnd != h.hwnd || h.origWndProc == 0 {
 		r, _, _ := procDefWindowProcW.Call(hwnd, msg, wp, lp)
 		return r
 	}
 	switch msg {
-	case wmSize:
-		if h.ready {
-			h.chromium.Resize()
-		}
-	case wmMove:
-		if h.ready {
-			_ = h.chromium.NotifyParentWindowPositionChanged()
-		}
-	case wmSetFocus:
-		if h.ready {
-			h.chromium.Focus()
-		}
-	case wmActivate:
-		if wp&0xFFFF == waInactive {
-			// Tray popup: close when another window takes focus.
-			if h.kind == windowKindTray && h.active {
-				procPostMessageW.Call(hwnd, wmClose, 0, 0)
-			}
-		} else {
-			h.active = true
-			if h.ready {
-				h.chromium.Focus()
-			}
-		}
 	case wmSettingChange:
 		if h.pageDark == 0 {
 			setTitleBarDark(hwnd, themeIsDark(uiTheme(), windowsAppsUseDark()))
 		}
-	case wmTimer:
-		if wp == hostShowTimerID {
-			h.show()
+	case wmActivate:
+		if wp&0xFFFF == waInactive {
+			// Tray popup: close when another window takes focus.
+			if h.kind == windowKindTray && h.active && h.ready {
+				procPostMessageW.Call(hwnd, wmClose, 0, 0)
+			}
+		} else if h.ready {
+			h.active = true
 		}
-		return 0
 	case wmGetMinMaxInfo:
 		if h.kind == windowKindMain {
 			mmi := (*minMaxInfo)(unsafe.Pointer(lp))
@@ -293,13 +304,8 @@ func hostWndProc(hwnd, msg, wp, lp uintptr) uintptr {
 		h.saveMainSize()
 	case wmClose:
 		h.saveMainSize()
-		procDestroyWindow.Call(hwnd)
-		return 0
-	case wmDestroy:
-		procPostQuitMessage.Call(0)
-		return 0
 	}
-	r, _, _ := procDefWindowProcW.Call(hwnd, msg, wp, lp)
+	r, _, _ := procCallWindowProcW.Call(h.origWndProc, hwnd, msg, wp, lp)
 	return r
 }
 
@@ -370,7 +376,7 @@ func hostRectFor(kind string, w, h int) windowRect {
 
 func findHostWindow(pid int) uintptr {
 	for _, w := range enumTopWindows() {
-		if int(w.pid) == pid && w.class == bddmWebViewClass {
+		if int(w.pid) == pid && (w.class == goWebView2Class || w.class == bddmWebViewClass) {
 			return w.hwnd
 		}
 	}
@@ -385,7 +391,14 @@ func launchWindowHost(u, kind string, r windowRect, fallback func() error) error
 	if exe == "" {
 		return fallback()
 	}
-	cmd := exec.Command(exe, append(windowHostArgs(u, kind, r), windowHostThemeArgs(uiTheme())...)...)
+	args := append(windowHostArgs(u, kind, r), windowHostThemeArgs(uiTheme())...)
+	if webviewDevToolsEnabled() {
+		args = append(args, "-devtools")
+	}
+	if webviewTestModeEnabled() {
+		args = append(args, "-wv2test")
+	}
+	cmd := exec.Command(exe, args...)
 	var err error
 	withForeground(func() { err = cmd.Start() })
 	if err != nil {
@@ -403,7 +416,7 @@ func launchWindowHost(u, kind string, r windowRect, fallback func() error) error
 			select {
 			case err := <-done:
 				if err != nil {
-					log.Printf("window host for %s failed: %v; using an Edge window", u, err)
+					log.Printf("window host for %s failed: %v (see %s); using an Edge window", u, err, webviewLogPath())
 					webviewBroken.Store(true)
 					_ = fallback()
 				}

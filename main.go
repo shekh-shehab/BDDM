@@ -21,6 +21,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"time"
 )
@@ -31,6 +32,7 @@ const port = "9614"
 const appVersion = "1.5.4"
 
 func main() {
+	runtime.LockOSThread()
 	noWindow := flag.Bool("nowindow", false, "do not open the window (run in the background)")
 	quitRunning := flag.Bool("quit", false, "stop a running BDDM (downloads are paused and saved) and exit")
 	registerOnly := flag.Bool("register", false, "update this install's Windows shortcuts and notifications, then exit")
@@ -38,7 +40,15 @@ func main() {
 	windowKind := flag.String("window-kind", windowKindPage, "internal: main, page, popup or tray")
 	windowRectArg := flag.String("window-rect", "", "internal: x,y,w,h in physical pixels")
 	windowTheme := flag.String("window-theme", themeSystem, "internal: system, light or dark")
+	devtools := flag.Bool("devtools", false, "debug: enable WebView2 DevTools (or set BDDM_DEVTOOLS=1)")
+	wv2test := flag.Bool("wv2test", false, "debug: show red WebView2 test page (or set BDDM_WV2_TEST=1)")
 	flag.Parse()
+	if *devtools {
+		setWebViewDevTools(true)
+	}
+	if *wv2test {
+		setWebViewTestMode(true)
+	}
 	if *windowURL != "" { // helper process for one BDDM window (bug 76)
 		setupWindowHostLog()
 		currentTheme.Store(normalizeTheme(*windowTheme))
@@ -266,12 +276,13 @@ func sendToRunning(appURL, link string) {
 // setupWindowHostLog sends a window helper's log to window-host.log, so it
 // never truncates bddm.log of the running BDDM.
 func setupWindowHostLog() {
-	dir := bddmConfigDir()
+	dir := webviewLogDir()
 	_ = os.MkdirAll(dir, 0755)
-	f, err := os.OpenFile(filepath.Join(dir, "window-host.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	f, err := os.OpenFile(webviewLogPath(), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		log.SetOutput(io.Discard)
 		return
 	}
+	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 	log.SetOutput(f)
 }

@@ -60,3 +60,19 @@ func refreshFrame(hwnd uintptr) {
 	)
 	procSetWindowPos.Call(hwnd, 0, 0, 0, 0, 0, swpNoMove|swpNoSize|swpNoZOrder|swpNoActivate|swpFrameChanged)
 }
+
+// themeBgColorRef returns the Win32 COLORREF (0x00BBGGRR) matching the theme.
+func themeBgColorRef(dark bool) uint32 {
+	if dark {
+		return 0x001A1614 // #14161a
+	}
+	return 0x00EEE9E6 // #e6e9ee
+}
+
+// themeBgRGB returns the sRGB bytes matching the theme.
+func themeBgRGB(dark bool) (r, g, b uint8) {
+	if dark {
+		return 0x14, 0x16, 0x1a
+	}
+	return 0xe6, 0xe9, 0xee
+}

@@ -27,8 +27,12 @@
     else delete root.dataset.scheme;
     var eff = effective();
     // Tell the WebView2 window so its title bar matches.
-    if (eff !== posted && window.chrome && window.chrome.webview) {
-      try { window.chrome.webview.postMessage("bddm:theme:" + eff); posted = eff; } catch (e) { /* ignore */ }
+    if (eff !== posted) {
+      if (window.bddmHostTheme) {
+        try { window.bddmHostTheme(eff); posted = eff; } catch (e) { /* ignore */ }
+      } else if (window.chrome && window.chrome.webview) {
+        try { window.chrome.webview.postMessage("bddm:theme:" + eff); posted = eff; } catch (e) { /* ignore */ }
+      }
     }
   }
 

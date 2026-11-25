@@ -355,7 +355,7 @@ func processExe(pid uint32) string {
 }
 
 func (w enumWnd) isBDDMApp() bool {
-	if w.class == bddmWebViewClass {
+	if w.class == goWebView2Class || w.class == bddmWebViewClass {
 		return isBDDMHostWindow(w.class, processExe(w.pid), selfExePath())
 	}
 	if !isChromeWidgetClass(w.class) {
