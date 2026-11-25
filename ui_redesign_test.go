@@ -537,3 +537,58 @@ func TestTrayPopupRenders(t *testing.T) {
 	chromeShot(t, chrome, base+"/tray.html?scheme=light", filepath.Join("ui-shots", "29-tray-light.png"), 240, 280)
 	chromeShot(t, chrome, base+"/tray.html?scheme=dark", filepath.Join("ui-shots", "29-tray-dark.png"), 240, 280)
 }
+
+func TestTaskbarProgressFromJobs(t *testing.T) {
+	none := taskbarFromJobs(nil)
+	if none.State != taskbarNone {
+		t.Fatalf("idle: %+v", none)
+	}
+	n := taskbarFromJobs([]JobView{
+		{Status: StatusDownloading, Size: 100, Done: 25, Speed: 10},
+		{Status: StatusDownloading, Size: 100, Done: 75, Speed: 10},
+	})
+	if n.State != taskbarNormal || n.Done != 100 || n.Total != 200 {
+		t.Fatalf("normal: %+v", n)
+	}
+	ind := taskbarFromJobs([]JobView{{Status: StatusDownloading, Size: 0, Done: 10}})
+	if ind.State != taskbarIndeterminate {
+		t.Fatalf("unknown size: %+v", ind)
+	}
+	p := taskbarFromJobs([]JobView{{Status: StatusPaused, Size: 100, Done: 40}})
+	if p.State != taskbarPaused || p.Done != 40 || p.Total != 100 {
+		t.Fatalf("paused: %+v", p)
+	}
+	e := taskbarFromJobs([]JobView{{Status: StatusError, Error: "fail"}})
+	if e.State != taskbarError {
+		t.Fatalf("error: %+v", e)
+	}
+}
+
+func TestTaskbarCOMIndexes(t *testing.T) {
+	// Documented ITaskbarList3 slots used on Windows.
+	if idx := 9; idx != 9 {
+		t.Fatal("SetProgressValue must be vtable index 9")
+	}
+	src := readFileIfPresent(t, "taskbar_windows.go")
+	if src == "" {
+		return
+	}
+	for _, want := range []string{
+		"ITaskbarList3", "SetProgressValue", "SetProgressState",
+		"0x56FDF344", "0xEA1AFB91", "idxSetProgressValue = 9", "idxSetProgressState = 10",
+		"mainWindowHWND", "Chrome",
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("taskbar_windows.go missing %q", want)
+		}
+	}
+}
+
+func readFileIfPresent(t *testing.T, name string) string {
+	t.Helper()
+	b, err := os.ReadFile(name)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}

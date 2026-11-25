@@ -102,6 +102,7 @@ func main() {
 	quit := func() {
 		once.Do(func() {
 			log.Print("Stopping: pausing downloads and saving...")
+			stopTaskbar()
 			stopTray()
 			upd.Stop()
 			m.Shutdown()
@@ -151,6 +152,7 @@ func main() {
 	}
 
 	startTray(port, quit, m)
+	startTaskbar(m)
 
 	log.Print("BDDM is running at " + appURL)
 	log.Print("Data folder: " + configDir)
