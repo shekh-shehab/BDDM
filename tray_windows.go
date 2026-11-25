@@ -122,12 +122,13 @@ type wndClassEx struct {
 }
 
 type winMsg struct {
-	hwnd    uintptr
-	message uint32
-	wParam  uintptr
-	lParam  uintptr
-	time    uint32
-	pt      struct{ x, y int32 }
+	hwnd     uintptr
+	message  uint32
+	wParam   uintptr
+	lParam   uintptr
+	time     uint32
+	pt       struct{ x, y int32 }
+	lPrivate uint32
 }
 
 type winPoint struct{ x, y int32 }
