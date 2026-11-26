@@ -3,11 +3,14 @@ package main
 // pdf.go: "Save as PDF" for view-only Google Drive files. The owner turned
 // off downloading, so the browser extension captures the page images that
 // Drive's viewer shows and sends them here one by one; BDDM writes them into
-// one PDF in the downloads folder and lists it as a finished download.
+// one PDF (or PNG images) in the folder the user chose and lists it as a
+// finished download.
 //
 //	POST /ext/pdf/start          {"name","url","pages"}  -> {"id"}
 //	POST /ext/pdf/{id}/page      {"n","data"}  (data: a data: URL, PNG or JPEG)
-//	POST /ext/pdf/{id}/finish    {"name","format","pageSize","orientation","allowMissing"}
+//	POST /ext/pdf/{id}/finish    {"name","format","pageSize","orientation","allowMissing","dir"}
+//	POST /ext/pdf/savedir        {"name","format"}  -> {"dir"}  default Save-to folder
+//	POST /ext/pdf/pickfolder     {"start"}          -> {"dir"}  Windows folder picker
 //	POST /ext/pdf/{id}/cancel
 //
 // format: "pdf" (one PDF), "png" (a folder of PNG images) or "zip" (a ZIP of
@@ -159,6 +162,7 @@ type PDFOptions struct {
 	PageSize     string `json:"pageSize"`    // fit, a3, a4, a5, letter, legal, tabloid
 	Orientation  string `json:"orientation"` // portrait, landscape
 	AllowMissing bool   `json:"allowMissing"`
+	Dir          string `json:"dir"` // folder chosen in the Save as PDF panel
 }
 
 // Page sizes in points (1/72 inch), portrait.
@@ -167,8 +171,45 @@ var pdfPageSizes = map[string][2]float64{
 	"letter": {612, 792}, "legal": {612, 1008}, "tabloid": {792, 1224},
 }
 
-// PDFFinish writes the result into the downloads folder and lists it as a
-// finished download.
+// PDFDefaultDir is the folder pre-filled in the Save as PDF panel: Documents
+// for a PDF, or the Images folder for PNG/ZIP, the same as regular downloads.
+func (m *Manager) PDFDefaultDir(name, format string) string {
+	format = strings.ToLower(strings.TrimSpace(format))
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if format == "png" || format == "zip" {
+		return m.settings.dirFor("x.png")
+	}
+	if strings.TrimSpace(name) == "" {
+		name = "document.pdf"
+	}
+	return m.settings.dirFor(pdfFileName(name))
+}
+
+// resolvePDFSaveDir uses the folder the user chose, or the usual category
+// folder when none was sent (tests and older extension builds).
+func (m *Manager) resolvePDFSaveDir(format, base, dir string) (string, error) {
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		if format == "png" || format == "zip" {
+			return m.settings.dirFor("x.png"), nil
+		}
+		return m.settings.dirFor(base), nil
+	}
+	dir = filepath.Clean(dir)
+	if !filepath.IsAbs(dir) {
+		return "", errors.New("Please choose a full folder path, for example D:\\Downloads.")
+	}
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return "", errors.New("Cannot use this folder: " + err.Error())
+	}
+	return dir, nil
+}
+
+// PDFFinish writes the result into the folder the user chose (or the
+// usual category folder) and lists it as a finished download.
 func (m *Manager) PDFFinish(id string, o PDFOptions) (JobView, int, error) {
 	o.Format = strings.ToLower(strings.TrimSpace(o.Format))
 	if o.Format == "" {
@@ -216,12 +257,11 @@ func (m *Manager) PDFFinish(id string, o PDFOptions) (JobView, int, error) {
 	}
 	stem := strings.TrimSuffix(base, ".pdf")
 
-	m.mu.Lock()
-	dir := m.settings.dirFor(base) // the Documents folder
-	if o.Format != "pdf" {
-		dir = m.settings.dirFor("x.png")
+	choseDir := strings.TrimSpace(o.Dir) != ""
+	dir, err := m.resolvePDFSaveDir(o.Format, base, o.Dir)
+	if err != nil {
+		return JobView{}, 0, err
 	}
-	m.mu.Unlock()
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return JobView{}, 0, err
 	}
@@ -279,6 +319,15 @@ func (m *Manager) PDFFinish(id string, o PDFOptions) (JobView, int, error) {
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if choseDir {
+		catName := base
+		if o.Format == "png" {
+			catName = "x.png"
+		} else if o.Format == "zip" {
+			catName = "x.zip"
+		}
+		m.rememberDirLocked(m.settings.categoryOf(catName), dir)
+	}
 	now := time.Now()
 	j := &Job{ID: newID(), URL: rawURL, Name: name, Dir: dir, Size: size, Status: StatusDone,
 		Kind: kindPDFCapture, Started: now, Finished: now, Parts: 1}

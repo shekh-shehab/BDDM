@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func testPage(w, h int, asJPEG bool) string {
@@ -139,5 +140,126 @@ func TestPDFCaptureFormats(t *testing.T) {
 	// A captured file is never a "downloaded before" match.
 	if m.FindDone("https://drive.google.com/file/d/x/view") != nil {
 		t.Fatal("capture counted as downloaded before")
+	}
+}
+
+func TestPDFFinishUsesChosenDir(t *testing.T) {
+	root := t.TempDir()
+	m, err := NewManager(root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dl := filepath.Join(root, "dl")
+	s := m.Settings()
+	s.DownloadDir = dl
+	if _, err := m.SetSettings(s); err != nil {
+		t.Fatal(err)
+	}
+	chosen := filepath.Join(root, "picked", "pdfs")
+	id, err := m.PDFStart("Notes.pdf", "https://drive.google.com/file/d/x/view", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.PDFPage(id, 0, testPage(20, 20, false)); err != nil {
+		t.Fatal(err)
+	}
+	j, pages, err := m.PDFFinish(id, PDFOptions{Format: "pdf", Dir: chosen})
+	if err != nil || pages != 1 {
+		t.Fatalf("finish: %+v %d %v", j, pages, err)
+	}
+	if j.Dir != filepath.Clean(chosen) {
+		t.Fatalf("dir: %q, want %q", j.Dir, chosen)
+	}
+	if _, err := os.Stat(filepath.Join(chosen, j.Name)); err != nil {
+		t.Fatalf("saved file: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dl, j.Name)); err == nil {
+		t.Fatal("file was also written to the default folder")
+	}
+	if got := m.PDFDefaultDir("Notes.pdf", "pdf"); got != filepath.Clean(chosen) {
+		t.Fatalf("remembered Documents folder: %q, want %q", got, chosen)
+	}
+	time.Sleep(200 * time.Millisecond) // rememberDirLocked saves settings in the background
+}
+
+func TestPDFFinishRejectsRelativeDir(t *testing.T) {
+	root := t.TempDir()
+	m, err := NewManager(root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := m.PDFStart("Notes.pdf", "https://drive.google.com/file/d/x/view", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.PDFPage(id, 0, testPage(20, 20, false)); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := m.PDFFinish(id, PDFOptions{Format: "pdf", Dir: "relative/out"}); err == nil {
+		t.Fatal("relative dir was accepted")
+	}
+	// The capture must still be there so the user can try again.
+	if _, _, err := m.PDFFinish(id, PDFOptions{Format: "pdf", Dir: filepath.Join(root, "ok")}); err != nil {
+		t.Fatalf("retry after bad dir: %v", err)
+	}
+	time.Sleep(200 * time.Millisecond) // rememberDirLocked saves settings in the background
+}
+
+func TestPDFDefaultDir(t *testing.T) {
+	root := t.TempDir()
+	m, err := NewManager(root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	docs := filepath.Join(root, "Documents")
+	imgs := filepath.Join(root, "Pictures")
+	s := m.Settings()
+	s.DownloadDir = filepath.Join(root, "dl")
+	for i := range s.Categories {
+		switch s.Categories[i].Name {
+		case "Documents":
+			s.Categories[i].Dir = docs
+		case "Images":
+			s.Categories[i].Dir = imgs
+		}
+	}
+	if _, err := m.SetSettings(s); err != nil {
+		t.Fatal(err)
+	}
+	if got := m.PDFDefaultDir("Notes.docx", "pdf"); got != docs {
+		t.Fatalf("pdf default: %q, want %q", got, docs)
+	}
+	if got := m.PDFDefaultDir("Notes", "png"); got != imgs {
+		t.Fatalf("png default: %q, want %q", got, imgs)
+	}
+}
+
+func TestSavePDFPanelAsksFolder(t *testing.T) {
+	js, err := os.ReadFile(filepath.Join("extension", "savepdf.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bg, err := os.ReadFile(filepath.Join("extension", "savepdf-bg.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertEnglishUI(t, "extension/savepdf.js", string(js))
+	assertEnglishUI(t, "extension/savepdf-bg.js", string(bg))
+	src := string(js) + "\n" + string(bg)
+	for _, want := range []string{
+		`"Save to"`,
+		`"Change..."`,
+		`id: "dir"`,
+		`id: "browse"`,
+		`type: "pdfSaveDir"`,
+		`type: "pdfPickFolder"`,
+		`dir,`,
+		`"/ext/pdf/savedir"`,
+		`"/ext/pdf/pickfolder"`,
+		`Choose a folder to save to.`,
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("Save as PDF panel missing %q", want)
+		}
 	}
 }

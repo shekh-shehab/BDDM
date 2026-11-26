@@ -125,6 +125,30 @@ func newServer(m *Manager, port string, quit func(), upd *Updater) http.Handler 
 		reply(w, errors.New("download not found"))
 	})
 	// Save as PDF for view-only Drive files (pdf.go).
+	mux.HandleFunc("POST /ext/pdf/savedir", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Name   string `json:"name"`
+			Format string `json:"format"`
+		}
+		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&body)
+		writeJSON(w, 200, map[string]any{"ok": true, "dir": m.PDFDefaultDir(body.Name, body.Format)})
+	})
+	mux.HandleFunc("POST /ext/pdf/pickfolder", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Start string `json:"start"`
+		}
+		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&body)
+		start := strings.TrimSpace(body.Start)
+		if start == "" {
+			start = m.PDFDefaultDir("", "pdf")
+		}
+		dir, err := pickFolder(start)
+		if err != nil {
+			reply(w, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"ok": true, "dir": dir})
+	})
 	mux.HandleFunc("POST /ext/pdf/start", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Name  string `json:"name"`

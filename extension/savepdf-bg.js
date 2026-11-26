@@ -1,7 +1,7 @@
 // savepdf-bg.js: the background half of "Save as PDF" (savepdf.js). It checks
 // whether a Drive file or Google Doc can be downloaded, reads its real name,
 // fetches sharper page images, and passes the captured pages to BDDM, which
-// writes the PDF (or PNG images) into its downloads folder.
+// writes the PDF (or PNG images) into the folder the user chose.
 /* global api, BDDM */
 
 const VIEW_ONLY_RE = /can(?:'|&#39;|&#x27;|’)?t download (?:this )?file|cannot download (?:this )?file|disabled download|turned off download|download, print,? and copy|only the owner can download|has disabled downloading/i;
@@ -177,6 +177,8 @@ const PDF_MESSAGES = {
   pdfName: (m) => fileName(m.kind, m.id, m.authuser || "").then((name) => ({ name })),
   pdfHiRes: (m, sender) => hiResPage(sender.tab ? sender.tab.id : -1, m.page, m.width).then((r) => r || {}),
   pdfFetchImage: (m) => imageUrlToPng(m.url),
+  pdfSaveDir: (m) => bddmPost("/ext/pdf/savedir", { name: m.name, format: m.format }),
+  pdfPickFolder: (m) => bddmPost("/ext/pdf/pickfolder", { start: m.start || "" }, 600000),
   pdfStart: (m) => bddmPost("/ext/pdf/start", { name: m.name, url: m.url, pages: m.pages }),
   pdfPage: (m) => bddmPost("/ext/pdf/" + encodeURIComponent(m.id) + "/page", { n: m.n, data: m.data }),
   pdfFinish: (m) => bddmPost("/ext/pdf/" + encodeURIComponent(m.id) + "/finish", m.options || {}, 300000),

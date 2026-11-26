@@ -2,7 +2,7 @@
 // downloading (view only). Drive's viewer shows each page as an image; this
 // scrolls through the preview so every page loads, captures the pages and
 // hands them to BDDM (through savepdf-bg.js), which writes a PDF, PNG images
-// or a ZIP of PNG images into its downloads folder.
+// or a ZIP of PNG images into the folder you choose (Save to), like other downloads.
 // Works on: PDF, Word (.docx) and PowerPoint (.pptx) previews in Drive, and
 // Google Docs documents. Not on Google Sheets, Slides or image previews.
 /* global api */
@@ -172,7 +172,7 @@
   // --- The button and panel (Shadow DOM, so Drive's styles do not reach it) --
 
   let host = null, shadow = null, panelOpen = false, busy = false, cancelled = false, session = "";
-  let ctxNow = null, fileName = "", nameFor = "", nameEdited = false;
+  let ctxNow = null, fileName = "", nameFor = "", nameEdited = false, dirEdited = false;
 
   const CSS = `
     :host { all: initial; }
@@ -188,6 +188,9 @@
     input, select { font: inherit; width: 100%; box-sizing: border-box; padding: 5px 7px; border: 1px solid #c4c7c5; border-radius: 6px; background: #fff; color: #202124; }
     .row { display: flex; gap: 8px; }
     .row > div { flex: 1; }
+    .line { display: flex; gap: 8px; align-items: stretch; }
+    .line input { flex: 1; min-width: 0; }
+    .line button { flex: 0 0 auto; }
     .buttons { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
     .status { margin-top: 10px; white-space: pre-wrap; }
     .bar { height: 6px; background: #e8eaed; border-radius: 3px; margin-top: 6px; overflow: hidden; }
@@ -233,6 +236,10 @@
                 h("select", { id: "orient" }, opt("portrait", "Portrait"), opt("landscape", "Landscape")))),
             h("div", { id: "qualrow" }, h("label", { for: "quality", text: "Quality" }),
               h("select", { id: "quality" }, opt("high", "High (sharper, bigger file)"), opt("normal", "Normal (as shown on screen)"))),
+            h("label", { for: "dir", text: "Save to" }),
+            h("div", { class: "line" },
+              h("input", { id: "dir", spellcheck: "false", autocomplete: "off" }),
+              h("button", { id: "browse", type: "button", text: "Change..." })),
             h("div", { class: "note", id: "note", hidden: true })),
           h("div", { class: "status", id: "status" }),
           h("div", { class: "bar", id: "bar", hidden: true }, h("div")),
@@ -249,8 +256,10 @@
     $("start").addEventListener("click", () => start());
     $("name").addEventListener("input", () => { nameEdited = true; });
     $("show").addEventListener("click", () => send({ type: "pdfShowBDDM" }));
-    $("format").addEventListener("change", syncOptions);
+    $("format").addEventListener("change", () => { syncOptions(); loadSaveDir(); });
     $("size").addEventListener("change", syncOptions);
+    $("dir").addEventListener("input", () => { dirEdited = true; });
+    $("browse").addEventListener("click", () => browseFolder());
     // Keys typed in the panel are not Drive's shortcuts.
     for (const ev of ["keydown", "keyup", "keypress"]) shadow.addEventListener(ev, (e) => e.stopPropagation());
     (document.body || document.documentElement).appendChild(host);
@@ -263,6 +272,27 @@
     const pdf = $("format").value === "pdf";
     $("pdfopts").hidden = !pdf;
     $("orient").disabled = $("size").value === "fit";
+  }
+
+  async function loadSaveDir() {
+    if (!shadow || dirEdited || !$("dir")) return;
+    try {
+      const r = await send({ type: "pdfSaveDir", name: $("name").value, format: $("format").value });
+      if (r && r.ok && r.dir && !dirEdited) $("dir").value = r.dir;
+    } catch (e) { /* Browse still works if BDDM did not answer */ }
+  }
+
+  async function browseFolder() {
+    const b = $("browse");
+    if (b) b.disabled = true;
+    try {
+      const r = await call({ type: "pdfPickFolder", start: $("dir").value });
+      if (r && r.dir) { $("dir").value = r.dir; dirEdited = true; }
+    } catch (e) {
+      setStatus("Couldn't open the folder picker: " + ((e && e.message) || e), "err");
+    } finally {
+      if (b) b.disabled = false;
+    }
   }
 
   function setStatus(text, cls = "") {
@@ -306,6 +336,7 @@
       nameEdited = false;
     }
     syncOptions();
+    loadSaveDir();
     setStatus("");
   }
 
@@ -541,17 +572,27 @@
     if (busy) return;
     const c = ctxNow || context();
     if (!c || c.mode === "unsupported") return;
+    let dir = ($("dir") && $("dir").value.trim()) || "";
+    if (!dir) {
+      await browseFolder();
+      dir = ($("dir") && $("dir").value.trim()) || "";
+    }
+    if (!dir) {
+      setStatus("Choose a folder to save to.", "err");
+      return;
+    }
     busy = true;
     cancelled = false;
     session = "";
     $("start").disabled = true;
-    $("form").querySelectorAll("input,select").forEach((e) => { e.disabled = true; });
+    $("form").querySelectorAll("input,select,button").forEach((e) => { if (e.id !== "cancel") e.disabled = true; });
     $("cancel").textContent = "Cancel";
     $("show").hidden = true;
     $("anyway").hidden = true;
     const options = {
       name: $("name").value.trim() || stem(fileName) || "Google Drive document",
       format: $("format").value, pageSize: $("size").value, orientation: $("orient").value,
+      dir,
     };
     try {
       setStatus("Starting...");
@@ -573,7 +614,7 @@
       setStatus(options.format === "pdf" ? "Building the PDF..." : "Saving the images...");
       const fin = await call({ type: "pdfFinish", id: session, options });
       session = "";
-      setStatus(`Saved to BDDM: ${fin.name} (${fin.pages} pages)`, "ok");
+      setStatus("Saved to " + (fin.dir ? fin.dir + ": " : "BDDM: ") + fin.name + " (" + fin.pages + " pages)", "ok");
       $("show").hidden = false;
     } catch (e) {
       if (session) send({ type: "pdfCancel", id: session });
@@ -584,7 +625,7 @@
       busy = false;
       cancelled = false;
       $("start").disabled = false;
-      $("form").querySelectorAll("input,select").forEach((el) => { el.disabled = false; });
+      $("form").querySelectorAll("input,select,button").forEach((el) => { el.disabled = false; });
       syncOptions();
       $("cancel").textContent = "Close";
       setProgress(0, 0);
