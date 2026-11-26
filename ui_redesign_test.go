@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -853,4 +854,91 @@ func TestPopupContentScreenshots(t *testing.T) {
 	chromeShot(t, chrome, base+"/progress.html?id=prog75&scheme=light", filepath.Join(dir, "75-progress-light.png"), 380, 350)
 	chromeShot(t, chrome, base+"/complete.html?id=comp75&scheme=light", filepath.Join(dir, "75-complete-light.png"), 380, 220)
 	chromeShot(t, chrome, base+"/error.html?id=err75&scheme=light", filepath.Join(dir, "75-error-light.png"), 420, 360)
+}
+
+// chromeFit opens a popup page in a headless browser as big as the window
+// BDDM first opens it (w x h) and returns the size fit.js measured for it.
+func chromeFit(t *testing.T, chrome, url string, w, h int) (int, int) {
+	t.Helper()
+	cmd := exec.Command(chrome, "--headless=new", "--disable-gpu", "--no-sandbox", "--hide-scrollbars",
+		"--window-size="+strconv.Itoa(w)+","+strconv.Itoa(h),
+		"--virtual-time-budget=5000", "--dump-dom", url)
+	cmd.Env = append(os.Environ(), "DBUS_SESSION_BUS_ADDRESS=")
+	b, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("dump %s: %v", url, err)
+	}
+	m := regexp.MustCompile(`data-bddm-fit="(\d+)x(\d+)"`).FindSubmatch(b)
+	if m == nil {
+		t.Fatalf("fit.js did not report a size for %s", url)
+	}
+	fw, _ := strconv.Atoi(string(m[1]))
+	fh, _ := strconv.Atoi(string(m[2]))
+	return fw, fh
+}
+
+// Bug 81: the Download Video window opened too tall and too wide because the
+// measurement could never be smaller than the window it was opened in.
+func TestVideoPopupFitsContentNotWindow(t *testing.T) {
+	chrome := findChrome()
+	if chrome == "" {
+		t.Skip("no chrome for measuring")
+	}
+	m, dl := newTestManager(t, 4)
+	// Each page view gets its own job: closing a video window cancels it.
+	for _, id := range []string{"fit-live-a", "fit-live-b"} {
+		live := seedReadyVideo(t, m, dl, id)
+		live.vpend.info = &VideoInfo{Title: "Live stream", Site: "generic", IsLive: true}
+	}
+	seedReadyVideo(t, m, dl, "fit-yt")
+	base := startUITestServer(t, m)
+
+	lw, lh := chromeFit(t, chrome, base+"/video.html?id=fit-live-a", 720, 760)
+	// The same page opened in a much smaller window must report the same size.
+	sw, sh := chromeFit(t, chrome, base+"/video.html?id=fit-live-b", 600, 480)
+	t.Logf("live stream: %dx%d (opened 720x760), %dx%d (opened 600x480)", lw, lh, sw, sh)
+	if lw != sw || lh != sh {
+		t.Errorf("size depends on the window it was opened in: %dx%d vs %dx%d", lw, lh, sw, sh)
+	}
+	if lw < 560 || lw > 640 {
+		t.Errorf("width %d should be 560..640, not the 720 the window opened with", lw)
+	}
+	if lh >= 560 {
+		t.Errorf("height %d leaves blank space: a live stream window has only 3 quality choices", lh)
+	}
+	_, yh := chromeFit(t, chrome, base+"/video.html?id=fit-yt", 720, 760)
+	t.Logf("youtube (6 qualities): height %d", yh)
+	if yh <= lh {
+		t.Errorf("a window with 6 qualities (%d) should be taller than one with 3 (%d)", yh, lh)
+	}
+	if yh > 760 {
+		t.Errorf("height %d is taller than the 760 it opened with", yh)
+	}
+}
+
+// The other content-sized popups must still fit their height to the content,
+// whatever size their window was opened at.
+func TestOtherPopupsFitHeight(t *testing.T) {
+	chrome := findChrome()
+	if chrome == "" {
+		t.Skip("no chrome for measuring")
+	}
+	m, _ := newTestManager(t, 4)
+	base := startUITestServer(t, m)
+	for _, c := range []struct {
+		page string
+		w, h int
+	}{
+		{"confirm.html?id=x", 600, 520}, {"drive.html?id=x", 600, 560}, {"torrent.html?id=x", 560, 620},
+		{"progress.html?id=x", 500, 400}, {"complete.html?id=x", 500, 240}, {"error.html?id=x", 500, 360},
+	} {
+		_, h1 := chromeFit(t, chrome, base+"/"+c.page, c.w, c.h)
+		_, h2 := chromeFit(t, chrome, base+"/"+c.page, 900, 900)
+		if h1 != h2 {
+			t.Errorf("%s: height depends on the window size (%d vs %d)", c.page, h1, h2)
+		}
+		if h1 < 80 || h1 > 800 {
+			t.Errorf("%s: odd height %d", c.page, h1)
+		}
+	}
 }

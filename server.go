@@ -579,7 +579,7 @@ func (s *server) addVideo(w http.ResponseWriter, req AddRequest) {
 		return
 	}
 	u := "http://127.0.0.1:" + s.port + "/video.html?id=" + job.ID
-	if err := openAppWindowSize(u, 720, 760); err != nil {
+	if err := openAppWindowSize(u, 600, 480); err != nil {
 		log.Printf("could not open the video window: %v (open %s)", err, u)
 	}
 	writeJSON(w, 200, map[string]any{"ok": true, "pending": true, "video": true, "job": job, "window": u})
