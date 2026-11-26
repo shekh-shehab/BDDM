@@ -82,7 +82,7 @@ func TestFirefoxEarlyCaptureWiredAndChromePathUnchanged(t *testing.T) {
 	}
 	s := string(bg)
 	for _, want := range []string{
-		`importScripts("compat.js", "firefox_capture.js")`,
+		`importScripts("compat.js", "firefox_capture.js", "handback.js")`,
 		"installFirefoxEarlyCapture",
 		"onFirefoxHeadersReceived",
 		"shouldInterceptFirefoxDownload",

@@ -48,6 +48,12 @@ func isExpiredStatus(code int) bool {
 		code == http.StatusNotFound || code == http.StatusGone
 }
 
+// isBlockStatus: the proxy or the site refuses BDDM on purpose (407 wants a
+// proxy sign-in, 451 is blocked for legal reasons). Asking again does not help.
+func isBlockStatus(code int) bool {
+	return code == http.StatusProxyAuthRequired || code == http.StatusUnavailableForLegalReasons
+}
+
 // normETag compares ETags without the weak marker W/ and the quotes.
 func normETag(s string) string {
 	s = strings.TrimSpace(s)

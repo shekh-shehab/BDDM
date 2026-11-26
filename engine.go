@@ -216,6 +216,9 @@ type Job struct {
 	Started  time.Time `json:"started"`
 	Finished time.Time `json:"finished"`
 	Removed  bool      `json:"removed,omitempty"` // removed from the list, still in history
+	// HandedBack: a failed download that the browser extension gave back to
+	// the browser (handback.go). The row stays with a plain message.
+	HandedBack bool `json:"handedBack,omitempty"`
 
 	// Videos (downloaded with yt-dlp).
 	Kind       string        `json:"kind,omitempty"` // "" = file, "video"
@@ -333,36 +336,37 @@ func (j *Job) displayName() string {
 
 // JobView is what the UI receives.
 type JobView struct {
-	ID       string  `json:"id"`
-	URL      string  `json:"url"`
-	Name     string  `json:"name"`
-	Dir      string  `json:"dir"`
-	Size     int64   `json:"size"`
-	Done     int64   `json:"done"`
-	Speed    float64 `json:"speed"`
-	ETA      int64   `json:"eta"` // seconds, -1 = unknown
-	Status   string  `json:"status"`
-	Error    string  `json:"error,omitempty"`
-	Message  string  `json:"message,omitempty"`
-	Started  string  `json:"started"`
-	Finished string  `json:"finished,omitempty"`
-	Removed  bool    `json:"removed,omitempty"`
-	Kind     string  `json:"kind,omitempty"`
-	Group    string  `json:"group,omitempty"`
-	QueuePos int     `json:"queuePos,omitempty"` // Queued: place in the queue (1 = next)
-	QueueLen int     `json:"queueLen,omitempty"`
-	ViewOnly bool    `json:"viewOnly,omitempty"` // Google Drive: the owner turned off downloading
-	Reason   string  `json:"reason,omitempty"`   // Error: what went wrong, in plain words
-	Fix      string  `json:"fix,omitempty"`      // Error: what to do about it
-	Checked  string  `json:"checked,omitempty"`  // checksum result ("SHA-256 matches ...")
-	NetWait  bool    `json:"netWait,omitempty"`  // waiting for the internet connection
-	Mirrors  int     `json:"mirrors,omitempty"`  // extra links
-	Peers    int     `json:"peers,omitempty"`    // torrent: connected peers
-	UpSpeed  float64 `json:"upSpeed,omitempty"`  // torrent: upload bytes/s
-	Files    int     `json:"files,omitempty"`    // torrent: number of files
-	Uploaded int64   `json:"uploaded,omitempty"` // torrent: bytes uploaded
-	DlLimit  *int64  `json:"dlLimit,omitempty"`
-	UlLimit  *int64  `json:"ulLimit,omitempty"`
+	ID         string  `json:"id"`
+	URL        string  `json:"url"`
+	Name       string  `json:"name"`
+	Dir        string  `json:"dir"`
+	Size       int64   `json:"size"`
+	Done       int64   `json:"done"`
+	Speed      float64 `json:"speed"`
+	ETA        int64   `json:"eta"` // seconds, -1 = unknown
+	Status     string  `json:"status"`
+	Error      string  `json:"error,omitempty"`
+	Message    string  `json:"message,omitempty"`
+	Started    string  `json:"started"`
+	Finished   string  `json:"finished,omitempty"`
+	Removed    bool    `json:"removed,omitempty"`
+	Kind       string  `json:"kind,omitempty"`
+	Group      string  `json:"group,omitempty"`
+	QueuePos   int     `json:"queuePos,omitempty"` // Queued: place in the queue (1 = next)
+	QueueLen   int     `json:"queueLen,omitempty"`
+	ViewOnly   bool    `json:"viewOnly,omitempty"`   // Google Drive: the owner turned off downloading
+	HandedBack bool    `json:"handedBack,omitempty"` // Error: the browser downloads it instead (item 18)
+	Reason     string  `json:"reason,omitempty"`     // Error: what went wrong, in plain words
+	Fix        string  `json:"fix,omitempty"`        // Error: what to do about it
+	Checked    string  `json:"checked,omitempty"`    // checksum result ("SHA-256 matches ...")
+	NetWait    bool    `json:"netWait,omitempty"`    // waiting for the internet connection
+	Mirrors    int     `json:"mirrors,omitempty"`    // extra links
+	Peers      int     `json:"peers,omitempty"`      // torrent: connected peers
+	UpSpeed    float64 `json:"upSpeed,omitempty"`    // torrent: upload bytes/s
+	Files      int     `json:"files,omitempty"`      // torrent: number of files
+	Uploaded   int64   `json:"uploaded,omitempty"`   // torrent: bytes uploaded
+	DlLimit    *int64  `json:"dlLimit,omitempty"`
+	UlLimit    *int64  `json:"ulLimit,omitempty"`
 }
 
 func (j *Job) viewLocked() JobView {
@@ -378,6 +382,13 @@ func (j *Job) viewLocked() JobView {
 	v.Checked, v.Mirrors = j.Checked, len(j.Mirrors)
 	if j.Status == StatusError {
 		v.Reason, v.Fix = explainError(j.Error)
+		if j.HandedBack {
+			v.HandedBack = true
+			v.Reason, v.Fix = msgHandedBack, fixHandedBack
+			if _, blocked := handBackKind(j.Error); !blocked {
+				v.Reason = msgHandedBackOther
+			}
+		}
 	}
 	if j.Status == StatusDone && j.Size > 0 {
 		v.Done = j.Size
@@ -939,6 +950,7 @@ func (m *Manager) Resume(id string) error {
 	defer m.mu.Unlock()
 	if j.Status == StatusPaused || j.Status == StatusError {
 		j.Error = ""
+		j.HandedBack = false
 		j.Removed = false
 		if j.Kind == kindTorrent {
 			if err := m.startTorrentLocked(j); err != nil {
@@ -1167,6 +1179,7 @@ func (m *Manager) startLocked(j *Job) {
 	j.stopReason = ""
 	j.Status = StatusDownloading
 	j.Error = ""
+	j.HandedBack = false
 	j.Checked = ""
 	j.liveMu.Lock()
 	j.speed = 0
@@ -1386,7 +1399,7 @@ func (m *Manager) runJob(ctx context.Context, j *Job) error {
 			break
 		}
 		var hs *httpStatusError
-		if !isDrive && errors.As(err, &hs) && isExpiredStatus(hs.code) {
+		if !isDrive && errors.As(err, &hs) && (isExpiredStatus(hs.code) || isBlockStatus(hs.code)) {
 			break // asking again does not help: the link itself is refused
 		}
 		if isNetErr(err) {
@@ -1434,7 +1447,16 @@ func (m *Manager) runJob(ctx context.Context, j *Job) error {
 			}
 			return fmt.Errorf("The server refused the download (HTTP %d %s).", hs.code, http.StatusText(hs.code))
 		}
+		if errors.As(err, &hs) && isBlockStatus(hs.code) {
+			return fmt.Errorf("The server refused the download (HTTP %d %s).", hs.code, http.StatusText(hs.code))
+		}
 		return fmt.Errorf("could not connect: %w", err)
+	}
+	// A login page, a captcha or a "just a moment" page instead of the file:
+	// never write it into the file (item 18: the browser gets the download).
+	if !isDrive && fetchURL == "" && j.Kind == "" &&
+		htmlInsteadOfFile(info.ContentType, info.Attachment, j.Want, rawURL, info.FinalURL) {
+		return errSitePage
 	}
 	// What identifies the file's version on the server. Google's links
 	// change on every start, so for Drive only the size counts.
@@ -1738,6 +1760,9 @@ type probeInfo struct {
 	ETag         string
 	LastModified string
 	Status       int       // HTTP status of the last answer (0 = no answer)
+	ContentType  string    // the answer's Content-Type (e.g. text/html)
+	Attachment   bool      // the answer names a file (Content-Disposition)
+	FinalURL     string    // the address after redirects
 	Sum          *Checksum // the file's checksum from the server's headers
 }
 
@@ -1801,6 +1826,10 @@ func probeKeep(ctx context.Context, client *http.Client, rawURL string, h reqHea
 		return info, nil, &httpStatusError{code: resp.StatusCode}
 	}
 	info.setValidators(resp)
+	info.ContentType = resp.Header.Get("Content-Type")
+	info.Attachment = filenameFromDisposition(resp.Header.Get("Content-Disposition")) != "" ||
+		strings.HasPrefix(strings.ToLower(strings.TrimSpace(resp.Header.Get("Content-Disposition"))), "attachment")
+	info.FinalURL = resp.Request.URL.String()
 	info.Filename = filenameFromHeaders(resp, resp.Request.URL.String())
 	if resp.StatusCode == http.StatusPartialContent {
 		a, b, okRange := contentRange(resp.Header.Get("Content-Range"))

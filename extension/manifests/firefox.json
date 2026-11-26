@@ -3,6 +3,7 @@
     "scripts": [
       "compat.js",
       "firefox_capture.js",
+      "handback.js",
       "background.js",
       "hls_capture.js",
       "overlay_rules.js",

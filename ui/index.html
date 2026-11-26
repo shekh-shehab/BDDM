@@ -155,6 +155,7 @@
   .badge.Downloading { color: var(--badge-dl-fg); border-color: var(--badge-dl-bd); background: var(--badge-dl-bg); }
   .badge.Done { color: var(--badge-ok-fg); border-color: var(--badge-ok-bd); background: var(--badge-ok-bg); }
   .badge.Error { color: var(--badge-err-fg); border-color: var(--badge-err-bd); background: var(--badge-err-bg); }
+  .badge.HandedBack { color: var(--badge-vo-fg); border-color: var(--badge-vo-bd); background: var(--badge-vo-bg); }
   .badge.ViewOnly { color: var(--badge-vo-fg); border-color: var(--badge-vo-bd); background: var(--badge-vo-bg); }
   .subhead { display: flex; align-items: center; gap: 8px; padding: 6px 4px; color: var(--text); font-weight: 600; cursor: pointer; user-select: none; }
   .subhead .count { font-weight: 400; }
@@ -772,15 +773,17 @@ function updateRow(r, j) {
   r._ico.textContent = ic.g;
   r._name.textContent = j.name;
   r._name.title = j.url;
-  const label = j.viewOnly ? "View only" : j.status;
+  const handed = j.status === "Error" && j.handedBack;
+  const label = j.viewOnly ? "View only" : handed ? "Handed to browser" : j.status;
   r._badge.textContent = label;
-  r._badge.className = "badge " + (j.viewOnly ? "ViewOnly" : j.status);
+  r._badge.className = "badge " + (j.viewOnly ? "ViewOnly" : handed ? "HandedBack" : j.status);
   const seeding = j.status === "Seeding";
   const known = j.size > 0;
   const pct = known ? Math.min(100, (j.done * 100) / j.size) : (j.status === "Done" || seeding ? 100 : 0);
-  r._bar.className = "bar " + j.status + (!known && j.status === "Downloading" ? " unknown" : "");
+  const barState = handed ? "Paused" : j.status; // a handed-back row is not red
+  r._bar.className = "bar " + barState + (!known && j.status === "Downloading" ? " unknown" : "");
   r._fill.style.width = pct.toFixed(1) + "%";
-  setSeg(r._seg, pct, j.status);
+  setSeg(r._seg, pct, barState);
   let sizeText = known ? fmtSize(j.done, true) + " / " + fmtSize(j.size) + "  (" + pct.toFixed(1) + "%)" : fmtSize(j.done, true) + " downloaded";
   if (j.kind === "torrent" && (j.status === "Downloading" || seeding || j.peers > 0)) {
     const n = j.peers || 0;
@@ -801,7 +804,7 @@ function updateRow(r, j) {
   else if (j.status === "Done") r._eta.textContent = "Finished " + fmtTime(j.finished);
   else r._eta.textContent = "";
   r._pause.hidden = !(j.status === "Downloading" || j.status === "Queued" || seeding);
-  r._resume.hidden = !(j.status === "Paused" || (j.status === "Error" && !j.viewOnly));
+  r._resume.hidden = !(j.status === "Paused" || (j.status === "Error" && !j.viewOnly && !handed));
   const showLimit = !j.viewOnly && j.status !== "Done" && (j.status === "Downloading" || j.status === "Queued" || j.status === "Paused" || j.status === "Error" || seeding);
   r._limit.hidden = !showLimit;
   r._limit.classList.toggle("limit", true);
@@ -812,9 +815,9 @@ function updateRow(r, j) {
   r._up.hidden = !queued || j.queuePos <= 1;
   r._down.hidden = !queued || j.queuePos >= j.queueLen;
   if (j.status === "Error") {
-    r._msg.className = j.viewOnly ? "msg" : "msg err";
+    r._msg.className = j.viewOnly || handed ? "msg" : "msg err";
     r._msg.textContent = (j.reason || j.error || "Failed") + (j.viewOnly ? " Open it in Firefox and use Save as PDF from the BDDM extension." : "");
-    if (j.fix && !j.viewOnly) r._msg.append(el("span", "fix", "What to do: " + j.fix));
+    if (j.fix && !j.viewOnly) r._msg.append(el("span", "fix", (handed ? "" : "What to do: ") + j.fix));
     if (j.error && j.reason && j.reason !== j.error) {
       const d = el("span", "details", "Details: " + j.error);
       r._msg.append(d);

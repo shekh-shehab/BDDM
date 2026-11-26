@@ -12,7 +12,7 @@
 
 // Chrome/Edge/Brave run this as a service worker and load the shim here;
 // Firefox loads compat.js first from the manifest.
-if (typeof api === "undefined" && typeof importScripts === "function") importScripts("compat.js", "firefox_capture.js");
+if (typeof api === "undefined" && typeof importScripts === "function") importScripts("compat.js", "firefox_capture.js", "handback.js");
 
 const BDDM = "http://127.0.0.1:9614";
 const MIN_SIZE = 10 * 1024;            // smaller files stay in the browser
@@ -384,12 +384,19 @@ async function track(job, info) {
   tracked[job.id] = { ...info, name: job.name || info.filename || "", added: Date.now() };
   await api.storage.local.set({ tracked });
   ensurePollAlarm();
+  quickPolls();
 }
 
 function ensurePollAlarm() {
   api.alarms.get(POLL_ALARM).then((a) => {
     if (!a) api.alarms.create(POLL_ALARM, { periodInMinutes: 0.5 });
   }).catch(() => {});
+}
+
+// A site that blocks BDDM fails the download within seconds: look soon (the
+// 30 second alarm alone would leave the user waiting), then the alarm goes on.
+function quickPolls() {
+  for (const ms of QUICK_POLL_MS) setTimeout(() => { pollJobs().catch(() => {}); }, ms);
 }
 
 async function markHandedBack(urls) {
@@ -408,22 +415,40 @@ async function wasHandedBack(urls) {
   return urls.some((u) => u && handedBack[u] && now - handedBack[u] < HANDED_BACK_TTL);
 }
 
-// Gives a download that BDDM could not finish back to Chrome.
-async function handBack(jobId, info, reason) {
+// Gives a download that BDDM could not finish back to the browser, which
+// downloads it itself (with its own sign-in and cookies). The link is marked
+// first, so the capture does not take the browser's new download again (a
+// loop); BDDM is told only when the browser really started it.
+async function handBack(jobId, info, reason, blocked) {
   const url = info.origUrl || info.url;
+  const name = info.name || baseName(url);
   await markHandedBack([info.url, info.origUrl]);
+  let started = false;
   try {
     const id = await api.downloads.download({ url, conflictAction: "uniquify" });
     if (typeof id === "number") ownDownloads.add(id);
-    notify("BDDM could not download this file",
-      (info.name || baseName(url)) + (reason ? " (" + reason + ")" : "") + ". Your browser is downloading it instead.");
+    started = true;
+    const n = handBackNotice(name, blocked, reason);
+    notify(n.title, n.message);
   } catch (e) {
-    notify("Download failed", (info.name || baseName(url)) + ": " + (reason || e.message));
+    notify("Download failed", name + ": " + (reason || e.message) + ". The browser could not start it either.");
   }
+  if (!started) return;
   try {
     await fetchTimeout(BDDM + "/ext/jobs/" + encodeURIComponent(jobId) + "/handedback", { method: "POST" }, SEND_TIMEOUT);
   } catch (e) { /* BDDM closed; fine */ }
 }
+
+// The browser's own download of a handed-back link failed too.
+api.downloads.onChanged.addListener((delta) => {
+  if (!delta || !ownDownloads.has(delta.id) || !delta.state || delta.state.current !== "interrupted") return;
+  api.downloads.search({ id: delta.id }).then(([d]) => {
+    const name = d && d.filename ? baseName(d.filename) : "";
+    notify("The browser could not download it either", (name ? name + ": " : "") +
+      ((d && d.error) ? d.error.replace(/_/g, " ").toLowerCase() : "the site refused the download") +
+      ". Try opening the page again and downloading from there.");
+  }).catch(() => {});
+});
 
 let polling = false;
 async function pollJobs() {
@@ -448,22 +473,23 @@ async function pollJobs() {
     for (const j of data.jobs || []) {
       const info = tracked[j.id];
       if (!info) continue;
-      if (j.status === "Error" && /view only/i.test(j.error || "")) {
+      const what = decideHandBack(j, info, now, TRACK_TTL);
+      const name = j.name || info.name || "";
+      if (what === "viewonly") {
         // The owner turned off downloading: the browser cannot get it either.
-        notify("Download not possible", (j.name || info.name || "") + ": " + j.error + " Open it in Firefox and use Save as PDF from the BDDM extension.");
-        done.add(j.id);
-      } else if (j.status === "Error" && /link has expired/i.test(j.error || "")) {
+        notify("Download not possible", name + ": " + j.error + " Open it in Firefox and use Save as PDF from the BDDM extension.");
+      } else if (what === "expired") {
         // Giving the old link back to the browser would fail too.
-        notify("Download link expired", (j.name || info.name || "") + ": click the download again on the website. BDDM will continue where it stopped.");
-        done.add(j.id);
-      } else if (j.status === "Error") {
-        await handBack(j.id, { ...info, name: j.name || info.name }, j.error);
-        done.add(j.id);
-      } else if (j.status === "Done" || j.removed) {
-        done.add(j.id); // finished, or the user deleted it in BDDM
-      } else if (now - info.added > TRACK_TTL) {
-        done.add(j.id);
+        notify("Download link expired", name + ": click the download again on the website. BDDM will continue where it stopped.");
+      } else if (what === "failed") {
+        // A problem on this computer: the browser cannot fix it either.
+        notify("Download failed", name + ": " + (j.error || "BDDM could not save the file") + ".");
+      } else if (what === "handback") {
+        await handBack(j.id, { ...info, name: j.name || info.name }, j.error, !!j.blocked);
+      } else if (what === "none") {
+        continue;
       }
+      done.add(j.id);
     }
     if (done.size) {
       const latest = await getTracked();

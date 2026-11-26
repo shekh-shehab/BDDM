@@ -97,8 +97,12 @@ func newServer(m *Manager, port string, quit func(), upd *Updater) http.Handler 
 		}
 		out := []map[string]any{}
 		for _, j := range m.Views(want) {
+			hand, blocked := handBackKind(j.Error)
 			out = append(out, map[string]any{"id": j.ID, "status": j.Status, "error": j.Error,
-				"name": j.Name, "url": j.URL, "removed": j.Removed})
+				"name": j.Name, "url": j.URL, "removed": j.Removed,
+				// Item 18: should the browser take over this failed download,
+				// and did the site refuse BDDM?
+				"handBack": hand, "blocked": blocked, "handedBack": j.HandedBack})
 			delete(want, j.ID)
 		}
 		missing := []string{}
@@ -107,22 +111,11 @@ func newServer(m *Manager, port string, quit func(), upd *Updater) http.Handler 
 		}
 		writeJSON(w, 200, map[string]any{"jobs": out, "missing": missing})
 	})
-	// The extension gave a failed job back to the browser: remove it from the
-	// list and delete its unfinished .part file (it stays in History).
-	// Finished downloads are never touched here.
+	// The extension gave a failed job back to the browser (item 18): the row
+	// stays with "handed back to browser" and its unfinished .part file is
+	// deleted. Finished downloads are never touched here.
 	mux.HandleFunc("POST /ext/jobs/{id}/handedback", func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		for _, j := range m.Views(map[string]bool{id: true}) {
-			if j.ID == id {
-				if j.Status == StatusError {
-					reply(w, m.Delete(id, true))
-				} else {
-					reply(w, nil)
-				}
-				return
-			}
-		}
-		reply(w, errors.New("download not found"))
+		reply(w, m.MarkHandedBack(r.PathValue("id")))
 	})
 	// Save as PDF for view-only Drive files (pdf.go).
 	mux.HandleFunc("POST /ext/pdf/savedir", func(w http.ResponseWriter, r *http.Request) {
