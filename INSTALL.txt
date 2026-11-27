@@ -1,4 +1,4 @@
-BDDM 1.5.5 - installing on a Windows computer
+BDDM 1.5.6 - installing on a Windows computer
 =============================================
 
 1. Install BDDM
@@ -92,8 +92,31 @@ Firefox
     extension\manifests\base.json before signing.
 
 
-3. What is new in 1.5.5
+3. What is new in 1.5.6
 -----------------------
+Real progress in each download row. A download that uses several parts
+now shows one segment per part, sized by the part's share of the file,
+each with its own fill. Active parts are blue, finished parts are green,
+parts that are retrying are orange stripes, and parts waiting for a turn
+are grey. A small line under the bar says, for example, "Parts: 3 active,
+1 retrying, 3 done, 1 waiting". Streaming (HLS) downloads show a bar of
+fragment blocks and a line such as "Fragments (video): 210 of 400 done,
+3 active, 1 retrying". A download that uses a single connection keeps a
+plain single bar. It works in the light and dark themes.
+
+When a website blocks BDDM from downloading a file (for example with an
+access denied or forbidden answer), BDDM now hands the download back to
+your browser instead of failing. The row shows "Site blocked BDDM -
+handed back to browser", and the browser downloads the file itself with
+your normal login. Normal downloads still go through BDDM, and
+Alt+click on a link still sends it to the browser.
+
+Browser extension 1.5.6: needed for the hand-back. After updating BDDM,
+click the reload button of BDDM on the extensions page (chrome://extensions
+or edge://extensions, with Developer mode on).
+
+4. What was new in 1.5.5
+------------------------
 When you choose Save as PDF for a Google Drive file that can only be
 viewed (not downloaded), BDDM now asks where to save the PDF. The Save to
 box shows the last folder you used, and Change... lets you pick another
@@ -107,8 +130,8 @@ Browser extension 1.5.5: includes the Save as PDF change. After updating
 BDDM, click the reload button of BDDM on the extensions page
 (chrome://extensions or edge://extensions, with Developer mode on).
 
-4. What was new in 1.5.4
------------------------
+5. What was new in 1.5.4
+------------------------
 BDDM's windows (main window, tray popup, Download Video, Download File
 Info, progress, complete, error, Google Drive folder, Add torrent) now
 open inside BDDM itself using Microsoft WebView2 instead of Edge app
@@ -135,8 +158,8 @@ the Windows light or dark mode, the default), Light or Dark. The choice
 applies at once to every BDDM window, including the title bar, and is
 remembered.
 
-5. What was new in 1.5.3
------------------------
+6. What was new in 1.5.3
+------------------------
 The Download Video window, and the other small windows (Download File Info,
 progress, complete, error, Google Drive folder, and Add torrent), now open
 at the size of their content instead of leaving a large empty gap. They
@@ -146,7 +169,7 @@ The browser extension is unchanged (still 1.5.0). Chrome, Edge and other
 Chromium browsers do not need a reload for this fix. Firefox users keep
 the 1.4.19 signed add-on for now.
 
-6. What was new in 1.5.2
+7. What was new in 1.5.2
 ------------------------
 The main BDDM window now opens at a medium size (about 900 by 650 pixels),
 centred on the work area, instead of opening maximized or filling most of
@@ -159,7 +182,7 @@ The browser extension is unchanged (still 1.5.0). Chrome, Edge and other
 Chromium browsers do not need a reload for this fix. Firefox users keep
 the 1.4.19 signed add-on for now.
 
-7. What was new in 1.5.1
+8. What was new in 1.5.1
 ------------------------
 The left-click tray popup is now a compact menu (about 260 pixels wide,
 tall enough for its items) anchored near the tray icon, and it closes
@@ -170,7 +193,7 @@ The browser extension is unchanged (still 1.5.0). Chrome, Edge and other
 Chromium browsers do not need a reload for this fix. Firefox users keep
 the 1.4.19 signed add-on for now.
 
-8. What was new in 1.5.0
+9. What was new in 1.5.0
 ------------------------
 This is a visual redesign of BDDM. Windows and the browser extension use
 the same clean look, follow Windows light or dark theme, and keep every
@@ -206,8 +229,8 @@ The browser extension is now 1.5.0. After you install this update:
   popup) is compact, with the video list, catch-download switches, and
   Open BDDM in the new look.
 
-9. What was new in 1.4.19
-------------------------
+10. What was new in 1.4.19
+--------------------------
 The browser extension was 1.4.19. After you installed that update, also
 install the signed Firefox file (drag BDDM-firefox-signed.xpi onto
 about:addons). You cannot update the 1.4.15 extension in place; Mozilla
@@ -232,8 +255,8 @@ need the extension reloaded or loaded again from the extension folder.
   is added there.
 
 
-10. What was new in 1.4.18
-------------------------
+11. What was new in 1.4.18
+--------------------------
 The browser extension is unchanged (still 1.4.15). You do not need to
 reload or reinstall it.
 - HLS (m3u8) streams are now downloaded by BDDM itself, including sites
@@ -247,8 +270,8 @@ reload or reinstall it.
   internet" apply the same way as for other downloads. Progress, pause
   and resume work like other jobs.
 
-11. What was new in 1.4.17
-------------------------
+12. What was new in 1.4.17
+--------------------------
 The browser extension is unchanged (still 1.4.15). You do not need to
 reload or reinstall it.
 - When you browse or another app uses the internet, BDDM automatically
@@ -259,8 +282,8 @@ reload or reinstall it.
   downloads while I use the internet". A small "Saving bandwidth" note
   appears in the window while BDDM is yielding.
 
-12. What was new in 1.4.16
--------------------------
+13. What was new in 1.4.16
+--------------------------
 The browser extension is unchanged (still 1.4.15). You do not need to
 reload or reinstall it.
 - BDDM no longer opens a console or Windows Terminal tab when it starts
@@ -268,8 +291,8 @@ reload or reinstall it.
   download messages are written to a log file in the BDDM data folder
   (%APPDATA%\BDDM\bddm.log).
 
-13. What was new in 1.4.15
--------------------------
+14. What was new in 1.4.15
+--------------------------
 The browser extension is now 1.4.15. Chrome, Edge and Brave keep the
 same capture behaviour; reload the unpacked extension (or the new zip)
 if you already have it installed.
@@ -284,8 +307,8 @@ place with this file — open the new .xpi (or drag it onto about:addons).
 - Files the page itself makes (blob: or data: links, including Send
   Anywhere-style transfers) stay in Firefox. BDDM does not intercept them.
 
-14. What was new in 1.4.14
--------------------------
+15. What was new in 1.4.14
+--------------------------
 The browser extension was unchanged in 1.4.14 (still 1.4.2.1). You do not
 need to reload or reinstall it for that update.
 - On Windows, every new BDDM window (including Download File Info, Add
@@ -295,8 +318,8 @@ need to reload or reinstall it for that update.
   in front of the BDDM window you opened them from, instead of appearing
   behind it.
 
-15. What was new in 1.4.13
--------------------------
+16. What was new in 1.4.13
+--------------------------
 The browser extension is unchanged (still 1.4.2.1). You do not need to
 reload or reinstall it.
 - When BDDM updates itself, it now saves your downloads and closes
@@ -306,8 +329,8 @@ reload or reinstall it.
   update BDDM start again automatically. Torrents you paused yourself
   stay paused.
 
-16. What was new in 1.4.12
--------------------------
+17. What was new in 1.4.12
+--------------------------
 The browser extension is unchanged (still 1.4.2.1). You do not need to
 reload or reinstall it.
 - On Windows, "download finished" notices now show BDDM as the sender,
@@ -319,8 +342,8 @@ reload or reinstall it.
   and pin BDDM again from the Start menu. Windows may also keep an old
   icon until you sign out or restart.
 
-17. What was new in 1.4.11
--------------------------
+18. What was new in 1.4.11
+--------------------------
 - BDDM has a new icon. You will see it on the app, the installer, the
   Start menu and desktop shortcuts, and in the window. Windows may keep
   showing the old icon until you sign out or restart.
@@ -330,7 +353,7 @@ may still show the previous icon. A later signed build will include the
 new one. If you use the Chromium extension (Chrome, Edge, Brave), load
 the new zip from this release to get the new icon.
 
-18. What was new in 1.4.10
+19. What was new in 1.4.10
 --------------------------
 The browser extension is unchanged (still 1.4.2.1). You do not need to
 reload or reinstall it.
@@ -342,7 +365,7 @@ reload or reinstall it.
   files are only deleted if you choose to delete them.
 
 
-19. What was new in 1.4.9
+20. What was new in 1.4.9
 -------------------------
 The browser extension is unchanged (still 1.4.2.1). You do not need to
 reload or reinstall it.
@@ -352,7 +375,7 @@ reload or reinstall it.
   folder. If that saved folder is no longer there, BDDM uses your usual
   download folder instead.
 
-20. What was new in 1.4.8
+21. What was new in 1.4.8
 -------------------------
 The browser extension is unchanged (still 1.4.2.1). You do not need to
 reload or reinstall it.
@@ -362,7 +385,7 @@ reload or reinstall it.
   and say if a picker is still hidden.
 
 
-21. What was new in 1.4.7
+22. What was new in 1.4.7
 -------------------------
 The browser extension is unchanged (still 1.4.2.1). You do not need to
 reload or reinstall it.
@@ -375,7 +398,7 @@ reload or reinstall it.
   Off returns the download to the Settings cap.
 
 
-22. What was new in 1.4.6
+23. What was new in 1.4.6
 -------------------------
 The browser extension is unchanged (still 1.4.2.1). You do not need to
 reload or reinstall it.
@@ -387,7 +410,7 @@ reload or reinstall it.
   the browser extension) brings the existing window to the front.
 
 
-23. What was new in 1.4.5
+24. What was new in 1.4.5
 -------------------------
 The browser extension is unchanged (still 1.4.2.1). You do not need to
 reload or reinstall it.
@@ -403,7 +426,7 @@ reload or reinstall it.
   through the firewall so other peers can connect.
 
 
-24. What was new in 1.4.4
+25. What was new in 1.4.4
 -------------------------
 The browser extension is unchanged (still 1.4.2.1). You do not need to
 reload or reinstall it.
@@ -418,7 +441,7 @@ reload or reinstall it.
   downloading.
 
 
-25. What was new in 1.4.3
+26. What was new in 1.4.3
 -------------------------
 The browser extension is unchanged (still 1.4.2.1). You do not need to
 reload or reinstall it.
@@ -430,7 +453,7 @@ reload or reinstall it.
   "Check for updates" button next to the version number.
 
 
-26. What was new in 1.4.2
+27. What was new in 1.4.2
 -------------------------
 Update the browser extension too (click its reload button on the
 extensions page, or install the new BDDM-firefox-signed.xpi in Firefox).
@@ -465,7 +488,7 @@ only once).
   explanation.
 
 
-27. What was new in 1.4.1
+28. What was new in 1.4.1
 -------------------------
 Fewer "HTTP 403 Forbidden" errors on sites where the browser itself can
 download (update the browser extension too: click its reload button on the
@@ -485,7 +508,7 @@ extensions page, or install the new BDDM-firefox-signed.xpi in Firefox):
 - When a site still refuses, BDDM says so plainly and explains what to do.
 
 
-28. What was new in 1.4.0
+29. What was new in 1.4.0
 -------------------------
 - Internet drops: downloads wait ("No internet connection. BDDM
   continues automatically when the connection is back") and continue by
@@ -512,7 +535,7 @@ extensions page, or install the new BDDM-firefox-signed.xpi in Firefox):
 - Errors are explained in plain words, with what to do about them.
 
 
-29. What was new in 1.3.0
+30. What was new in 1.3.0
 -------------------------
 - Folders by file type: Settings > "Folders by file type" sets a folder
   for Video, Audio, Documents, Compressed, Programs, Images and Other.
