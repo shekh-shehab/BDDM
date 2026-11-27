@@ -26,9 +26,11 @@ import (
 )
 
 const (
-	kindTorrent       = "torrent"
-	StatusSeeding     = "Seeding"
-	torrentListenPort = 6881
+	kindTorrent               = "torrent"
+	StatusSeeding             = "Seeding"
+	torrentListenPort         = 6881
+	torrentPeerSearchInterval = 5 * time.Minute
+	msgSearchingPeers         = "Searching for peers..."
 )
 
 // Aliases so engine.go can hold these handles without importing the library.
@@ -909,6 +911,155 @@ func (m *Manager) startTorrentLocked(j *Job) error {
 	return nil
 }
 
+// torrentPeerSearch times when a downloading torrent with no connected
+// peers should look for peers again. The timer starts when the peer count
+// drops to zero while the torrent is downloading (not paused or seeding).
+// After torrentPeerSearchInterval it re-announces, and it keeps doing so
+// every interval until at least one peer is found. Peers appearing, or
+// leaving the downloading state, reset the timer.
+type torrentPeerSearch struct {
+	zeroSince time.Time
+	lastTry   time.Time
+}
+
+func (s torrentPeerSearch) shouldSearch(now time.Time, peers int, downloading bool, interval time.Duration) (search bool, next torrentPeerSearch) {
+	if interval <= 0 {
+		interval = torrentPeerSearchInterval
+	}
+	if !downloading || peers > 0 {
+		return false, torrentPeerSearch{}
+	}
+	next = s
+	if next.zeroSince.IsZero() {
+		next.zeroSince = now
+	}
+	if now.Sub(next.zeroSince) < interval {
+		return false, next
+	}
+	if next.lastTry.IsZero() || now.Sub(next.lastTry) >= interval {
+		next.lastTry = now
+		return true, next
+	}
+	return false, next
+}
+
+func (m *Manager) peerSearchInterval() time.Duration {
+	if m != nil && m.peerSearchEvery > 0 {
+		return m.peerSearchEvery
+	}
+	return torrentPeerSearchInterval
+}
+
+// searchTorrentPeers asks the torrent library to look for peers again:
+// re-announce to trackers, announce to DHT, and re-offer known addresses
+// (PEX only works once peers are already connected). Private torrents
+// skip DHT, as the specification requires.
+func (m *Manager) searchTorrentPeers(th torrentHandle) {
+	if th == nil {
+		return
+	}
+	searchTorrentTrackers(th)
+	private := torrentIsPrivate(th)
+	if !private {
+		m.mu.Lock()
+		cl := m.tClient
+		m.mu.Unlock()
+		searchTorrentDHT(th, cl)
+	}
+	// Re-add addresses the client already knows so it tries them again.
+	// With zero connected peers the library has no PEX messages to send.
+	if swarm := th.KnownSwarm(); len(swarm) > 0 {
+		th.AddPeers(swarm)
+	}
+}
+
+func torrentIsPrivate(th torrentHandle) bool {
+	if th == nil {
+		return false
+	}
+	info := th.Info()
+	return info != nil && info.Private != nil && *info.Private
+}
+
+func searchTorrentTrackers(th torrentHandle) {
+	if th == nil {
+		return
+	}
+	mi := th.Metainfo()
+	list := mi.UpvertedAnnounceList()
+	if len(list) == 0 {
+		return
+	}
+	th.ModifyTrackers(list)
+}
+
+func searchTorrentDHT(th torrentHandle, cl torrentClient) {
+	if th == nil || cl == nil {
+		return
+	}
+	for _, s := range cl.DhtServers() {
+		s := s
+		done, stop, err := th.AnnounceToDht(s)
+		if err != nil || stop == nil {
+			continue
+		}
+		go func() {
+			timer := time.NewTimer(45 * time.Second)
+			defer timer.Stop()
+			select {
+			case <-done:
+			case <-timer.C:
+			}
+			stop()
+		}()
+	}
+}
+
+func (j *Job) updatePeerSearch(now time.Time, peers int, downloading bool, interval time.Duration) (search bool) {
+	j.liveMu.Lock()
+	defer j.liveMu.Unlock()
+	if downloading {
+		search, j.peerSearch = j.peerSearch.shouldSearch(now, peers, true, interval)
+		if search {
+			j.searchingPeers = true
+			j.peerSearches++
+		} else if peers > 0 {
+			j.searchingPeers = false
+			if j.message == msgSearchingPeers {
+				j.message = ""
+			}
+		}
+		return search
+	}
+	j.peerSearch = torrentPeerSearch{}
+	j.searchingPeers = false
+	if j.message == msgSearchingPeers {
+		j.message = ""
+	}
+	return false
+}
+
+func (j *Job) clearPeerSearchMessage() {
+	j.liveMu.Lock()
+	j.peerSearch = torrentPeerSearch{}
+	j.searchingPeers = false
+	if j.message == msgSearchingPeers {
+		j.message = ""
+	}
+	j.liveMu.Unlock()
+}
+
+func (j *Job) resetPeerSearch() {
+	j.liveMu.Lock()
+	j.peerSearch = torrentPeerSearch{}
+	j.searchingPeers = false
+	j.peerSearches = 0
+	if j.message == msgSearchingPeers {
+		j.message = ""
+	}
+	j.liveMu.Unlock()
+}
+
 func (m *Manager) runTorrent(j *Job, ctx context.Context) {
 	defer func() {
 		m.mu.Lock()
@@ -923,12 +1074,15 @@ func (m *Manager) runTorrent(j *Job, ctx context.Context) {
 		if reason == "pause" && (j.Status == StatusDownloading || j.Status == StatusSeeding) {
 			j.Status = StatusPaused
 		}
+		j.clearPeerSearchMessage()
 		m.dirty = true
 		m.mu.Unlock()
 		if ch != nil {
 			close(ch)
 		}
 	}()
+
+	j.resetPeerSearch()
 
 	tick := time.NewTicker(time.Second)
 	defer tick.Stop()
@@ -1009,9 +1163,14 @@ func (m *Manager) runTorrent(j *Job, ctx context.Context) {
 				j.Status = StatusDownloading
 				j.Finished = time.Time{}
 			}
+			searchPeers := j.updatePeerSearch(now, peers, j.Status == StatusDownloading, m.peerSearchInterval())
 			m.dirty = true
 			name := j.displayName()
 			m.mu.Unlock()
+			if searchPeers {
+				j.setMessage(msgSearchingPeers)
+				m.searchTorrentPeers(th)
+			}
 			if becameSeed {
 				log.Printf("[%s] torrent complete; seeding", name)
 				if m.notify != nil {

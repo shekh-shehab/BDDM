@@ -656,3 +656,287 @@ func TestTorrentSeedingResumesAfterShutdown(t *testing.T) {
 	m2 := reopenTorrentManager(t, cfg, dl, false)
 	waitTorrentStatus(t, m2, job.ID, StatusSeeding, 15*time.Second)
 }
+
+func torrentPeerSearches(j *Job) int {
+	if j == nil {
+		return 0
+	}
+	j.liveMu.Lock()
+	defer j.liveMu.Unlock()
+	return j.peerSearches
+}
+
+func TestTorrentPeerSearchTiming(t *testing.T) {
+	interval := 5 * time.Minute
+	start := time.Date(2026, 11, 27, 12, 0, 0, 0, time.UTC)
+	var s torrentPeerSearch
+
+	search, s := s.shouldSearch(start, 0, true, interval)
+	if search {
+		t.Fatal("must not search at the moment peers drop to zero")
+	}
+	if s.zeroSince != start {
+		t.Fatalf("timer should start now, got %v", s.zeroSince)
+	}
+
+	search, s = s.shouldSearch(start.Add(interval-time.Second), 0, true, interval)
+	if search {
+		t.Fatal("must not search before 5 minutes of no peers")
+	}
+
+	search, s = s.shouldSearch(start.Add(interval), 0, true, interval)
+	if !search {
+		t.Fatal("must search after 5 minutes with no peers")
+	}
+	if s.lastTry != start.Add(interval) {
+		t.Fatalf("lastTry: got %v", s.lastTry)
+	}
+
+	search, s = s.shouldSearch(start.Add(interval+2*time.Minute), 0, true, interval)
+	if search {
+		t.Fatal("must wait another 5 minutes after a search")
+	}
+
+	search, s = s.shouldSearch(start.Add(2*interval), 0, true, interval)
+	if !search {
+		t.Fatal("must search again 5 minutes after the last attempt")
+	}
+
+	// A connected peer resets the timer.
+	search, s = s.shouldSearch(start.Add(2*interval+time.Minute), 1, true, interval)
+	if search {
+		t.Fatal("must not search once a peer is connected")
+	}
+	if s != (torrentPeerSearch{}) {
+		t.Fatalf("timer should reset when a peer appears, got %+v", s)
+	}
+
+	// After peers drop out again, the 5-minute wait starts over.
+	later := start.Add(2*interval + 2*time.Minute)
+	search, s = s.shouldSearch(later, 0, true, interval)
+	if search {
+		t.Fatal("must not search immediately after peers drop out again")
+	}
+	search, _ = s.shouldSearch(later.Add(interval-time.Second), 0, true, interval)
+	if search {
+		t.Fatal("reset timer must still wait a full 5 minutes")
+	}
+	search, _ = s.shouldSearch(later.Add(interval), 0, true, interval)
+	if !search {
+		t.Fatal("must search 5 minutes after peers dropped out again")
+	}
+}
+
+func TestTorrentPeerSearchOnlyWhileDownloading(t *testing.T) {
+	interval := 5 * time.Minute
+	start := time.Date(2026, 11, 27, 12, 0, 0, 0, time.UTC)
+	var s torrentPeerSearch
+
+	// Paused (or any non-downloading state) does not start the timer.
+	search, s := s.shouldSearch(start, 0, false, interval)
+	if search || s != (torrentPeerSearch{}) {
+		t.Fatalf("paused torrent must not search or start the timer: search=%v state=%+v", search, s)
+	}
+
+	// Timer is running, then the torrent is paused or finishes: reset, no search.
+	search, s = s.shouldSearch(start, 0, true, interval)
+	if search {
+		t.Fatal("unexpected search when the timer starts")
+	}
+	search, s = s.shouldSearch(start.Add(interval), 0, false, interval)
+	if search {
+		t.Fatal("must not search once the torrent is no longer downloading")
+	}
+	if s != (torrentPeerSearch{}) {
+		t.Fatalf("leaving Downloading should reset the timer, got %+v", s)
+	}
+
+	// Seeding with zero peers must not search.
+	search, s = torrentPeerSearch{}.shouldSearch(start.Add(interval), 0, false, interval)
+	if search || s != (torrentPeerSearch{}) {
+		t.Fatalf("seeding must not search for peers: search=%v state=%+v", search, s)
+	}
+}
+
+func TestTorrentSearchingPeersMessageStaysVisible(t *testing.T) {
+	j := &Job{
+		ID:     "peer-search-msg",
+		Kind:   kindTorrent,
+		Status: StatusDownloading,
+		Name:   "lonely.iso",
+	}
+	j.message = msgSearchingPeers
+	j.msgTime = time.Now().Add(-time.Hour)
+	j.searchingPeers = true
+
+	v := j.viewLocked()
+	if v.Message != msgSearchingPeers {
+		t.Fatalf("searching status should stay visible after 30s, got %q", v.Message)
+	}
+
+	j.searchingPeers = false
+	v = j.viewLocked()
+	if v.Message != "" {
+		t.Fatalf("old message should expire once a search is no longer in progress, got %q", v.Message)
+	}
+}
+
+func TestTorrentSearchesForPeersWhenAlone(t *testing.T) {
+	m, dl := torrentTestManager(t)
+	m.peerSearchEvery = 200 * time.Millisecond
+
+	meta, _, _ := writeTestTorrent(t, t.TempDir(), "alone.bin", bytes.Repeat([]byte("bddm-alone-"), 2000))
+	job, err := m.AddTorrentFile(meta, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.StartTorrent(job.ID, dl); err != nil {
+		t.Fatal(err)
+	}
+	waitTorrentStatus(t, m, job.ID, StatusDownloading, 5*time.Second)
+
+	deadline := time.Now().Add(8 * time.Second)
+	var searches int
+	var view JobView
+	for time.Now().Before(deadline) {
+		j := torrentJob(m, job.ID)
+		searches = torrentPeerSearches(j)
+		m.mu.Lock()
+		if j != nil {
+			view = j.viewLocked()
+		}
+		m.mu.Unlock()
+		if searches >= 2 && view.Message == msgSearchingPeers {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if searches < 2 {
+		t.Fatalf("expected at least 2 peer searches while alone, got %d (message %q)", searches, view.Message)
+	}
+	if view.Message != msgSearchingPeers {
+		t.Fatalf("expected %q, got %q after %d searches", msgSearchingPeers, view.Message, searches)
+	}
+	if view.Peers != 0 {
+		t.Fatalf("test torrent should still have 0 peers, got %d", view.Peers)
+	}
+}
+
+func TestTorrentPeerSearchResetsWhenPeerAppears(t *testing.T) {
+	data := bytes.Repeat([]byte("BDDM-PEER-RESET-"), 4096)
+	tmp := t.TempDir()
+	meta, mi, srcDir := writeTestTorrent(t, tmp, "reset.bin", data)
+	seeder := startTestSeeder(t, mi, srcDir)
+
+	m, dl := torrentTestManager(t)
+	m.peerSearchEvery = 200 * time.Millisecond
+	job, err := m.AddTorrentFile(meta, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.StartTorrent(job.ID, dl); err != nil {
+		t.Fatal(err)
+	}
+	waitTorrentStatus(t, m, job.ID, StatusDownloading, 5*time.Second)
+
+	deadline := time.Now().Add(6 * time.Second)
+	for time.Now().Before(deadline) {
+		if torrentPeerSearches(torrentJob(m, job.ID)) >= 1 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if torrentPeerSearches(torrentJob(m, job.ID)) < 1 {
+		t.Fatal("expected a peer search before the seeder was added")
+	}
+
+	if err := m.addTorrentClientPeer(job.ID, seeder); err != nil {
+		t.Fatal(err)
+	}
+
+	deadline = time.Now().Add(15 * time.Second)
+	var view JobView
+	foundPeer := false
+	for time.Now().Before(deadline) {
+		m.mu.Lock()
+		if j := m.findLocked(job.ID); j != nil {
+			view = j.viewLocked()
+		}
+		m.mu.Unlock()
+		if view.Peers > 0 || view.Status == StatusSeeding {
+			foundPeer = true
+			if view.Message == msgSearchingPeers {
+				time.Sleep(50 * time.Millisecond)
+				continue
+			}
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !foundPeer {
+		t.Fatalf("seeder never connected: %+v", view)
+	}
+	if view.Message == msgSearchingPeers {
+		t.Fatal("searching status should clear once a peer is connected")
+	}
+
+	after := torrentPeerSearches(torrentJob(m, job.ID))
+	time.Sleep(2 * time.Second)
+	later := torrentPeerSearches(torrentJob(m, job.ID))
+	if later > after {
+		t.Fatalf("must not keep searching after a peer appears: was %d, now %d", after, later)
+	}
+}
+
+func TestTorrentPeerSearchSkipsWhenPaused(t *testing.T) {
+	m, dl := torrentTestManager(t)
+	m.peerSearchEvery = 200 * time.Millisecond
+
+	meta, _, _ := writeTestTorrent(t, t.TempDir(), "paused-search.bin", bytes.Repeat([]byte("bddm-paused-search-"), 2000))
+	job, err := m.AddTorrentFile(meta, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.StartTorrent(job.ID, dl); err != nil {
+		t.Fatal(err)
+	}
+	waitTorrentStatus(t, m, job.ID, StatusDownloading, 5*time.Second)
+	if err := m.Pause(job.ID); err != nil {
+		t.Fatal(err)
+	}
+	waitTorrentStatus(t, m, job.ID, StatusPaused, 5*time.Second)
+
+	time.Sleep(2 * time.Second)
+	j := torrentJob(m, job.ID)
+	if n := torrentPeerSearches(j); n != 0 {
+		t.Fatalf("paused torrent must not search for peers, got %d searches", n)
+	}
+	m.mu.Lock()
+	view := j.viewLocked()
+	m.mu.Unlock()
+	if view.Message == msgSearchingPeers {
+		t.Fatal("paused torrent must not show a searching-for-peers status")
+	}
+}
+
+func TestSearchTorrentPeersSafeOnLiveTorrent(t *testing.T) {
+	m, dl := torrentTestManager(t)
+	meta, _, _ := writeTestTorrent(t, t.TempDir(), "safe.bin", bytes.Repeat([]byte("bddm-safe-"), 2000))
+	job, err := m.AddTorrentFile(meta, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.StartTorrent(job.ID, dl); err != nil {
+		t.Fatal(err)
+	}
+	waitTorrentStatus(t, m, job.ID, StatusDownloading, 5*time.Second)
+
+	m.mu.Lock()
+	j := m.findLocked(job.ID)
+	th := j.th
+	m.mu.Unlock()
+	if th == nil {
+		t.Fatal("expected a live torrent handle")
+	}
+	m.searchTorrentPeers(th)
+}

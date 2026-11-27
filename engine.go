@@ -306,6 +306,9 @@ type Job struct {
 	th                 torrentHandle // the live torrent, if any
 	upSpeed            float64
 	peers              int
+	peerSearch         torrentPeerSearch
+	searchingPeers     bool  // UI: keep "Searching for peers..." visible
+	peerSearches       int   // re-announce attempts in this run
 	tPaceDown, tPaceUp int64 // last counters for per-torrent pacing
 	tPaceInit          bool
 	tReady             bool              // add window: metadata is available
@@ -429,6 +432,11 @@ func (j *Job) viewLocked() JobView {
 				// keep the last measured upload speed
 			}
 		}
+		// Keep the "searching for peers" line visible until a peer appears,
+		// even after the usual 30-second message window.
+		if j.searchingPeers && j.message != "" {
+			v.Message = j.message
+		}
 		j.liveMu.Unlock()
 		if j.Torrent != nil {
 			v.Files = j.Torrent.Files
@@ -499,9 +507,10 @@ type Manager struct {
 	groups       []*Group                // folder downloads (groups.go)
 	ann          announcer               // toasts / notifications (groups.go)
 
-	tClient    torrentClient                // shared BitTorrent client (torrent.go)
-	tLoopback  bool                         // tests: listen on 127.0.0.1 only, no DHT
-	tPieceComp map[string]torrentPieceStore // open piece-completion stores, keyed by info hash
+	tClient         torrentClient                // shared BitTorrent client (torrent.go)
+	tLoopback       bool                         // tests: listen on 127.0.0.1 only, no DHT
+	peerSearchEvery time.Duration                // tests: override torrentPeerSearchInterval
+	tPieceComp      map[string]torrentPieceStore // open piece-completion stores, keyed by info hash
 
 	// Speed limits (speedlimit.go).
 	httpLim      *tokenBucket
