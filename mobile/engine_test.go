@@ -200,6 +200,31 @@ func TestParseAndroidRelease(t *testing.T) {
 	}
 }
 
+func TestParseAndroidReleaseSplitApks(t *testing.T) {
+	u := parseAndroidRelease(&ghRelease{
+		Tag:  "android-v1.6.1",
+		HTML: "https://github.com/shekh-shehab/BDDM/releases/tag/android-v1.6.1",
+		Assets: []ghAsset{
+			{Name: "BDDM-Android-1.6.1-armeabi-v7a.apk", URL: "https://example.com/v7.apk"},
+			{Name: "BDDM-Android-1.6.1-armeabi-v7a.apk.sha256", URL: "https://example.com/v7.sha256"},
+			{Name: "BDDM-Android-1.6.1-arm64-v8a.apk", URL: "https://example.com/arm64.apk"},
+			{Name: "BDDM-Android-1.6.1-arm64-v8a.apk.sha256", URL: "https://example.com/arm64.sha256"},
+		},
+	})
+	if u == nil || u.Version != "1.6.1" {
+		t.Fatalf("parse: %+v", u)
+	}
+	if u.APKArm64 != "https://example.com/arm64.apk" || u.APKArmv7 != "https://example.com/v7.apk" {
+		t.Fatalf("abi assets: %+v", u)
+	}
+	if u.APK != u.APKArm64 {
+		t.Fatalf("default apk should prefer arm64, got %q", u.APK)
+	}
+	if u.SHA256Arm64 != "https://example.com/arm64.sha256" {
+		t.Fatalf("sha: %+v", u)
+	}
+}
+
 func TestPlanPartsCoversFile(t *testing.T) {
 	const size int64 = 1000
 	parts := planParts(size, 8)

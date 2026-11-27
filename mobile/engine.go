@@ -16,7 +16,7 @@ import (
 	"time"
 )
 
-const AppVersion = "1.6.0"
+const AppVersion = "1.6.1"
 
 const (
 	StatusQueued      = "Queued"

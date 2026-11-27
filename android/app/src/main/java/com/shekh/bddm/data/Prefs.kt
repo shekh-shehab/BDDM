@@ -52,6 +52,20 @@ class Prefs(private val ctx: Context) {
         get() = sp.getString("siteAdblock", "{}") ?: "{}"
         set(v) { sp.edit().putString("siteAdblock", v).apply() }
 
+    var openPolicyJson: String
+        get() = sp.getString("openPolicy", "{}") ?: "{}"
+        set(v) { sp.edit().putString("openPolicy", v).apply() }
+
+    fun openPolicy(host: String): String = OpenPolicy.get(openPolicyJson, host)
+
+    fun setOpenPolicy(host: String, policy: String) {
+        openPolicyJson = OpenPolicy.set(openPolicyJson, host, policy)
+    }
+
+    fun openPolicyEntries(): List<Pair<String, String>> =
+        OpenPolicy.parse(openPolicyJson).toList().sortedBy { it.first }
+
+
     fun adblockOnFor(host: String): Boolean {
         if (!adBlocker) return false
         return try {

@@ -34,7 +34,7 @@ data class Snap(
 )
 
 fun parseSnap(raw: String): Snap {
-    val o = try { JSONObject(raw) } catch (_: Exception) { return Snap("1.6.0", emptyList(), 0.0, -1, 0.0, 0, 0, 0, 0) }
+    val o = try { JSONObject(raw) } catch (_: Exception) { return Snap("1.6.1", emptyList(), 0.0, -1, 0.0, 0, 0, 0, 0) }
     val arr = o.optJSONArray("jobs")
     val jobs = mutableListOf<Job>()
     if (arr != null) for (i in 0 until arr.length()) {
@@ -58,7 +58,7 @@ fun parseSnap(raw: String): Snap {
         ))
     }
     return Snap(
-        version = o.optString("version", "1.6.0"),
+        version = o.optString("version", "1.6.1"),
         jobs = jobs,
         speed = o.optDouble("speed"),
         eta = o.optLong("eta", -1),

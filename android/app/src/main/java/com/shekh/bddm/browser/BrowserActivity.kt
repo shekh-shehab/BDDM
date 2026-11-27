@@ -60,6 +60,7 @@ class BrowserActivity : ComponentActivity() {
     var customView: View? = null
     var customCallback: WebChromeClient.CustomViewCallback? = null
     var hideSwitcher: (() -> Unit)? = null
+    @Volatile var trustedLoad = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -117,6 +118,7 @@ fun BrowserRoot(act: BrowserActivity) {
     var detected by remember { mutableStateOf(listOf<PendingDownload>()) }
     var iframeUrls by remember { mutableStateOf(listOf<String>()) }
     var probing by remember { mutableStateOf(false) }
+    var pendingOpen by remember { mutableStateOf<OpenRequest?>(null) }
     var showDetected by remember { mutableStateOf(false) }
     var showTabs by remember { mutableStateOf(false) }
     var incognitoSpace by remember { mutableStateOf(false) }
@@ -155,7 +157,34 @@ fun BrowserRoot(act: BrowserActivity) {
         address = url
         tab.url = url
         store.touch(tab)
+        act.trustedLoad = true
         act.webView?.loadUrl(url)
+    }
+
+    fun openInNewTab(url: String) {
+        act.trustedLoad = true
+        store.addTab(url = url)
+        idx = store.currentIndex()
+        address = url
+        tabTick++
+    }
+
+    fun considerOpen(url: String) {
+        val toHost = OpenPolicy.normalize(AdBlocker.hostOf(url)) ?: return
+        val fromHost = OpenPolicy.normalize(AdBlocker.hostOf(tab.url)) ?: ""
+        if (fromHost.isBlank() || tab.url.isBlank() || tab.url.startsWith("about:")) {
+            openInNewTab(url)
+            return
+        }
+        if (OpenPolicy.sameSite(fromHost, toHost)) {
+            openInNewTab(url)
+            return
+        }
+        when (prefs.openPolicy(fromHost)) {
+            OpenPolicy.ALLOW -> openInNewTab(url)
+            OpenPolicy.BLOCK -> { }
+            else -> pendingOpen = OpenRequest(fromHost, url, toHost)
+        }
     }
 
     BDDMTheme(prefs.theme) {
@@ -245,6 +274,8 @@ fun BrowserRoot(act: BrowserActivity) {
                                 settings.mediaPlaybackRequiresUserGesture = false
                                 settings.allowFileAccess = false
                                 settings.loadsImagesAutomatically = true
+                                settings.setSupportMultipleWindows(true)
+                                settings.javaScriptCanOpenWindowsAutomatically = true
                                 settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                                 settings.userAgentString = FilterEngine.chromeLikeUa(settings.userAgentString)
                                 setLayerType(View.LAYER_TYPE_HARDWARE, null)
@@ -266,6 +297,7 @@ fun BrowserRoot(act: BrowserActivity) {
                                         }
                                     }
                                     override fun onPageFinished(view: WebView?, url: String?) {
+                                        act.trustedLoad = false
                                         blocked = ad.blockedOnPage.get()
                                         tab.blocked = blocked
                                         if (url != null && url.startsWith("http")) {
@@ -283,17 +315,45 @@ fun BrowserRoot(act: BrowserActivity) {
                                     }
                                     override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                                         val u = request?.url?.toString() ?: return false
-                                        // about:blank, blob: and data: are used by JW Player and other embeds.
-                                        if (u.startsWith("http") || u.startsWith("blob:") || u.startsWith("data:") ||
+                                        if (u.startsWith("blob:") || u.startsWith("data:") ||
                                             u.startsWith("about:") || u.startsWith("javascript:")) return false
+                                        if (!u.startsWith("http")) return true
+                                        if (request?.isForMainFrame != true) return false
+                                        if (act.trustedLoad) return false
+                                        val toHost = OpenPolicy.normalize(AdBlocker.hostOf(u))
+                                        val fromHost = OpenPolicy.normalize(AdBlocker.hostOf(tab.url))
+                                        if (toHost == null || fromHost == null || OpenPolicy.sameSite(fromHost, toHost)) return false
+                                        view?.post { considerOpen(u) }
                                         return true
                                     }
                                 }
                                 webChromeClient = object : WebChromeClient() {
                                     override fun onCreateWindow(view: WebView?, isDialog: Boolean, isUserGesture: Boolean, resultMsg: android.os.Message?): Boolean {
                                         if (prefs.blockPopups && !isUserGesture) return false
-                                        if (prefs.blockPopups && isDialog) return false
-                                        return false
+                                        if (resultMsg == null) return false
+                                        val tmp = WebView(act).apply {
+                                            settings.javaScriptEnabled = true
+                                            webViewClient = object : WebViewClient() {
+                                                private fun capture(url: String?) {
+                                                    val u = url ?: return
+                                                    if (!u.startsWith("http")) return
+                                                    post {
+                                                        considerOpen(u)
+                                                        try { destroy() } catch (_: Exception) {}
+                                                    }
+                                                }
+                                                override fun shouldOverrideUrlLoading(v: WebView?, req: WebResourceRequest?): Boolean {
+                                                    capture(req?.url?.toString()); return true
+                                                }
+                                                override fun onPageStarted(v: WebView?, url: String?, favicon: Bitmap?) {
+                                                    if (url != null && url.startsWith("http")) capture(url)
+                                                }
+                                            }
+                                        }
+                                        val transport = resultMsg.obj as? WebView.WebViewTransport ?: return false
+                                        transport.webView = tmp
+                                        resultMsg.sendToTarget()
+                                        return true
                                     }
                                     override fun onReceivedTitle(view: WebView?, title: String?) {
                                         if (!title.isNullOrBlank()) tab.title = title
@@ -318,6 +378,7 @@ fun BrowserRoot(act: BrowserActivity) {
                                         if (grant.isNotEmpty()) req.grant(grant.toTypedArray()) else req.deny()
                                     }
                                 }
+                                act.trustedLoad = true
                                 loadUrl(tab.url.ifBlank { "about:blank" })
                             }
                         }, modifier = Modifier.fillMaxSize(), update = { wv -> act.webView = wv })
@@ -387,6 +448,22 @@ fun BrowserRoot(act: BrowserActivity) {
                         }
                     }
                 },
+            )
+        }
+        val openReq = pendingOpen
+        if (openReq != null) {
+            OpenSiteSheet(
+                req = openReq,
+                onOpen = { always ->
+                    if (always) prefs.setOpenPolicy(openReq.fromHost, OpenPolicy.ALLOW)
+                    pendingOpen = null
+                    openInNewTab(openReq.url)
+                },
+                onBlock = { always ->
+                    if (always) prefs.setOpenPolicy(openReq.fromHost, OpenPolicy.BLOCK)
+                    pendingOpen = null
+                },
+                onDismiss = { pendingOpen = null },
             )
         }
         if (showTabs) {

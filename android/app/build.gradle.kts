@@ -11,8 +11,8 @@ android {
         applicationId = "com.shekh.bddm"
         minSdk = 26
         targetSdk = 34
-        versionCode = 160
-        versionName = "1.6.0"
+        versionCode = 161
+        versionName = "1.6.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // ABI splits below produce per-ABI APKs (item 98).
     }

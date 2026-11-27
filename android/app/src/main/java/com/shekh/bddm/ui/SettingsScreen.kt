@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.sp
 import com.shekh.bddm.BDDMApp
 import com.shekh.bddm.core.mobile.Mobile
 import com.shekh.bddm.data.EngineHolder
+import com.shekh.bddm.data.OpenPolicy
 import org.json.JSONObject
 
 @Composable
@@ -42,6 +43,7 @@ fun SettingsScreen() {
     var updateMsg by remember { mutableStateOf<String?>(null) }
     var updateUrl by remember { mutableStateOf<String?>(null) }
     var checking by remember { mutableStateOf(false) }
+    var policies by remember { mutableStateOf(prefs.openPolicyEntries()) }
 
     LaunchedEffect(Unit) {
         try {
@@ -114,7 +116,7 @@ fun SettingsScreen() {
                 Toggle("Ad blocker", "Blocks ads and scripts in the BDDM browser.", ad) {
                     ad = it; prefs.adBlocker = it; pushEngine("adBlocker" to it)
                 }
-                Toggle("Block popups", null, popups) { popups = it; prefs.blockPopups = it; pushEngine("blockPopups" to it) }
+                Toggle("Block popups", "Blocks windows that open without a tap. A tap that opens another site still asks first.", popups) { popups = it; prefs.blockPopups = it; pushEngine("blockPopups" to it) }
                 Toggle("Block trackers", null, trackers) { trackers = it; prefs.blockTrackers = it; pushEngine("blockTrackers" to it) }
                 Toggle("Update filter lists automatically", "Daily updates (EasyList, EasyPrivacy).", autoLists) {
                     autoLists = it; prefs.filterListAutoUpdate = it; pushEngine("filterListAutoUpdate" to it)
@@ -139,6 +141,25 @@ fun SettingsScreen() {
                     wifiOnly = it; prefs.wifiOnly = it; pushEngine("wifiOnly" to it)
                 }
                 Toggle("Show notifications", null, notify) { notify = it; prefs.notifications = it; pushEngine("notifications" to it) }
+                if (policies.isNotEmpty()) {
+                    Spacer(Modifier.height(8.dp))
+                    Text("Always Open or Block from these sites", fontWeight = FontWeight.Medium)
+                    Text("These choices come from the “Always for this site” box when a page tries to open another site.",
+                        fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    policies.forEach { (host, policy) ->
+                        Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(host)
+                                Text(if (policy == OpenPolicy.ALLOW) "Always open in a new tab" else "Always block",
+                                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            TextButton(onClick = {
+                                prefs.setOpenPolicy(host, OpenPolicy.ASK)
+                                policies = prefs.openPolicyEntries()
+                            }) { Text("Ask again") }
+                        }
+                    }
+                }
             }
         }
         Spacer(Modifier.height(10.dp))
@@ -160,14 +181,14 @@ fun SettingsScreen() {
                             val o = try { JSONObject(raw) } catch (_: Exception) { JSONObject() }
                             val newer = o.optBoolean("newer")
                             val ver = o.optString("version")
-                            val apk = o.optString("apk")
                             val err = o.optString("error")
+                            val apk = OpenPolicy.pickApkUrl(o, android.os.Build.SUPPORTED_ABIS.toList())
                             updateMsg = when {
                                 err.isNotBlank() -> err
                                 newer -> "BDDM $ver is available"
                                 else -> "You're up to date"
                             }
-                            updateUrl = apk.ifBlank { o.optString("url") }.ifBlank { null }
+                            updateUrl = apk
                             checking = false
                         }
                     }, enabled = !checking) { Text(if (checking) "Checking…" else "Check now") }

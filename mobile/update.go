@@ -17,10 +17,14 @@ type UpdateInfo struct {
 	Newer   bool   `json:"newer"`
 	Version string `json:"version,omitempty"`
 	Tag     string `json:"tag,omitempty"`
-	URL     string `json:"url,omitempty"`
-	APK     string `json:"apk,omitempty"`
-	SHA256  string `json:"sha256,omitempty"`
-	Error   string `json:"error,omitempty"`
+	URL         string `json:"url,omitempty"`
+	APK         string `json:"apk,omitempty"`
+	APKArm64    string `json:"apkArm64,omitempty"`
+	APKArmv7    string `json:"apkArmv7,omitempty"`
+	SHA256      string `json:"sha256,omitempty"`
+	SHA256Arm64 string `json:"sha256Arm64,omitempty"`
+	SHA256Armv7 string `json:"sha256Armv7,omitempty"`
+	Error       string `json:"error,omitempty"`
 }
 
 // CheckUpdate looks through GitHub releases for the newest Android APK
@@ -105,11 +109,36 @@ func parseAndroidRelease(r *ghRelease) *UpdateInfo {
 	out := &UpdateInfo{Version: ver, Tag: tag, URL: r.HTML}
 	for _, a := range r.Assets {
 		n := strings.ToLower(a.Name)
-		if strings.HasSuffix(n, ".apk") && strings.Contains(n, "android") {
-			out.APK = a.URL
+		switch {
+		case strings.HasSuffix(n, ".apk") && strings.Contains(n, "arm64"):
+			out.APKArm64 = a.URL
+		case strings.HasSuffix(n, ".apk") && (strings.Contains(n, "armeabi-v7a") || strings.Contains(n, "armv7")):
+			out.APKArmv7 = a.URL
+		case strings.HasSuffix(n, ".apk") && strings.Contains(n, "android"):
+			if out.APK == "" {
+				out.APK = a.URL
+			}
+		case strings.HasSuffix(n, ".sha256") && strings.Contains(n, "arm64"):
+			out.SHA256Arm64 = a.URL
+		case strings.HasSuffix(n, ".sha256") && (strings.Contains(n, "armeabi-v7a") || strings.Contains(n, "armv7")):
+			out.SHA256Armv7 = a.URL
+		case strings.HasSuffix(n, ".sha256") && strings.Contains(n, "android"):
+			if out.SHA256 == "" {
+				out.SHA256 = a.URL
+			}
 		}
-		if strings.HasSuffix(n, ".sha256") && strings.Contains(n, "android") {
-			out.SHA256 = a.URL
+	}
+	if out.APK == "" {
+		if out.APKArm64 != "" {
+			out.APK = out.APKArm64
+			if out.SHA256 == "" {
+				out.SHA256 = out.SHA256Arm64
+			}
+		} else {
+			out.APK = out.APKArmv7
+			if out.SHA256 == "" {
+				out.SHA256 = out.SHA256Armv7
+			}
 		}
 	}
 	if out.APK == "" {
