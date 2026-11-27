@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "BDDM Download Catcher",
-  "version": "1.5.7",
+  "version": "1.5.8",
   "description": "Sends your browser downloads and videos to the BDDM download manager running on this computer.",
   "icons": {
     "16": "icons/icon16.png",

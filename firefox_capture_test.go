@@ -107,8 +107,8 @@ func TestFirefoxEarlyCaptureWiredAndChromePathUnchanged(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(base), `"version": "1.5.7"`) {
-		t.Errorf("extension version should be 1.5.7, got %s", base)
+	if !strings.Contains(string(base), `"version": "1.5.8"`) {
+		t.Errorf("extension version should be 1.5.8, got %s", base)
 	}
 	ff, err := os.ReadFile(filepath.Join("extension", "manifests", "firefox.json"))
 	if err != nil {
