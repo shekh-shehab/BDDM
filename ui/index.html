@@ -132,14 +132,15 @@
   /* addbar restyled above */
 
   .empty { color: var(--muted); text-align: center; padding: 60px 0; }
-  .item { display: grid; grid-template-columns: 40px minmax(0,1fr) auto; gap: 12px; align-items: center; padding: 11px 12px; margin-bottom: 9px; }
-  .item .ico { grid-row: 1 / span 4; }
-  .item .mid { min-width: 0; grid-column: 2; }
+  /* One grid row: do not let the icon span empty rows (that left a blank
+     band under the stats, with the 12px grid gap repeated). */
+  .item { display: grid; grid-template-columns: 40px minmax(0,1fr) auto; gap: 8px 12px; align-items: start; padding: 10px 12px; margin-bottom: 8px; }
   .item .ico { align-self: start; margin-top: 2px; }
+  .item .mid { min-width: 0; grid-column: 2; }
   .item .actions { grid-column: 3; grid-row: 1; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; max-width: 220px; align-self: start; }
   .item .actions button { padding: 4px 9px; font-size: 11px; }
   .item .children { grid-column: 1 / -1; }
-  .seg { display: flex; gap: 3px; height: 8px; margin: 8px 0 6px; }
+  .seg { display: flex; gap: 3px; height: 8px; margin: 6px 0 4px; }
   .seg i { flex: 1; border-radius: 2px; background: var(--neutral); }
   .seg i.on { background: var(--accent); }
   .seg.Done i.on, .seg.Seeding i.on { background: var(--ok); }
@@ -159,7 +160,7 @@
   .seg.rt.Paused i b, .seg.rt.Paused i.s-done b { background: var(--warn); }
   .seg.rt.Error i b, .seg.rt.Error i.s-done b { background: var(--bad); }
   .seg.rt.Seeding i b { background: var(--ok); }
-  .partsline { color: var(--muted); font-size: 11px; margin: -2px 0 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .partsline { color: var(--muted); font-size: 11px; margin: -2px 0 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .partsline[hidden] { display: none; }
   .bar { display: none; }
   .stats-row { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; margin-bottom: 12px; }

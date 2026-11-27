@@ -2405,6 +2405,9 @@ func (w *partWriter) Write(p []byte) (int, error) {
 	lv := d.liveLocked(w.idx)
 	lv.reserved = 0
 	lv.got += int64(n)
+	if n > 0 {
+		lv.retrying = false // data is flowing again after a retry
+	}
 	finished := partFinished(d.State.Parts[w.idx])
 	d.mu.Unlock()
 	d.job.done.Add(int64(n))

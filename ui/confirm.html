@@ -13,8 +13,9 @@
   .more summary { cursor: pointer; color: var(--text2); margin-bottom: 8px; }
   .more textarea { width: 100%; box-sizing: border-box; font: 12px/1.4 Consolas, monospace; resize: vertical; }
   .catnote { font-weight: 400; color: var(--muted); }
-  html, body { margin: 0; height: 100%; }
-  body { display: flex; flex-direction: column; }
+  html, body { margin: 0; }
+  body { display: flex; flex-direction: column; min-height: 0; }
+  .field { margin-bottom: 10px; }
   header { display: flex; align-items: center; gap: 10px; padding: 14px 18px 10px; font-weight: 600; font-size: 15px; }
   header img { width: 24px; height: 24px; flex: none; border-radius: 8px; display: block; }
   main { flex: 0 1 auto; min-height: 0; padding: 8px 18px 8px; overflow: auto; }
@@ -34,13 +35,14 @@
   .warn { display: none; gap: 10px; align-items: flex-start; background: var(--badge-pause-bg); border: 1px solid var(--badge-pause-bd); color: var(--badge-pause-fg); border-radius: 12px; padding: 10px 12px; margin-bottom: 13px; font-size: 13px; }
   .warn.show { display: flex; }
   .warn b { word-break: break-all; }
-  .err { color: var(--text-danger); font-size: 13px; min-height: 18px; }
+  .err { color: var(--text-danger); font-size: 13px; }
+  .err:empty { display: none; }
   footer { display: flex; gap: 8px; align-items: center; padding: 12px 18px; border-top: 1px solid var(--border); }
   footer .spacer { flex: 1; }
   .dim { color: var(--muted); font-size: 12px; }
 </style>
 </head>
-<body>
+<body data-fit-min="440" data-fit-max="520">
 <header>
   <img src="icon-32.png" alt="" width="24" height="24">
   Download File Info
@@ -166,6 +168,7 @@ async function load() {
   }
   if (v.formats && v.formats.length && !v.checking) $("size").textContent = "Not known yet";
   if (v.checking) timer = setTimeout(load, 700);
+  if (window.bddmFitWindow) bddmFitWindow();
 }
 async function start(later) {
   $("err").textContent = "";
@@ -206,6 +209,7 @@ $("browse").onclick = async () => {
   } catch (e) { $("err").textContent = "Folder picker: " + e.message; }
   $("browse").disabled = false;
 };
+$("more").addEventListener("toggle", () => { if (window.bddmFitWindow) bddmFitWindow(); });
 document.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !$("start").disabled) { e.preventDefault(); start(false); }
   if (e.key === "Escape") { e.preventDefault(); cancel(); }

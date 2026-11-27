@@ -505,7 +505,13 @@ func (m *Manager) downloadHLSList(ctx context.Context, j *Job, keys *hlsKeyCache
 			defer func() { <-sem }()
 			path := hlsSegPath(work, prefix, i)
 			hp.set(i, fragBusy)
-			err := m.downloadHLSSeg(ctx, j, keys, seg, path, hidden, func() { hp.set(i, fragRetry) })
+			err := m.downloadHLSSeg(ctx, j, keys, seg, path, hidden, func(retrying bool) {
+				if retrying {
+					hp.set(i, fragRetry)
+				} else {
+					hp.set(i, fragBusy)
+				}
+			})
 			if err != nil {
 				if j.skipFrags && ctx.Err() == nil && !isNetErr(err) {
 					log.Printf("[%s] skipping fragment %d: %v", j.Name, i+1, err)
@@ -565,11 +571,14 @@ func ctxErr(err error) bool {
 	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
-func (m *Manager) downloadHLSSeg(ctx context.Context, j *Job, keys *hlsKeyCache, seg hlsSeg, path string, hidden bool, onRetry func()) error {
+func (m *Manager) downloadHLSSeg(ctx context.Context, j *Job, keys *hlsKeyCache, seg hlsSeg, path string, hidden bool, onState func(retrying bool)) error {
 	var last error
 	for try := 1; try <= hlsSegTries; try++ {
 		if err := ctx.Err(); err != nil {
 			return err
+		}
+		if try > 1 && onState != nil {
+			onState(false) // the next attempt is downloading again
 		}
 		err := m.downloadHLSOne(ctx, j, keys, seg, path, hidden)
 		if err == nil {
@@ -583,8 +592,8 @@ func (m *Manager) downloadHLSSeg(ctx context.Context, j *Job, keys *hlsKeyCache,
 			return err
 		}
 		wait := backoff(try)
-		if onRetry != nil {
-			onRetry()
+		if onState != nil {
+			onState(true)
 		}
 		j.setMessage("Segment retry (%s); continuing in %s...", shortReason(err), wait)
 		select {

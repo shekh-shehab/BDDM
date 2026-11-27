@@ -654,7 +654,7 @@ func (s *server) handleCaptured(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u := "http://127.0.0.1:" + s.port + "/confirm.html?id=" + job.ID
-	if err := openAppWindowSize(u, 600, 520); err != nil {
+	if err := openAppWindowSize(u, confirmWindowWidth, confirmWindowHeight); err != nil {
 		// No window could be shown: do not lose the download, start it.
 		log.Printf("could not open the confirm window: %v; starting the download", err)
 		if started, err := s.m.StartPending(job.ID, "", "", false, ""); err == nil {
@@ -720,7 +720,7 @@ func (s *server) addPendingWindow(w http.ResponseWriter, req AddRequest) {
 		return
 	}
 	u := "http://127.0.0.1:" + s.port + "/confirm.html?id=" + job.ID
-	if err := openAppWindowSize(u, 600, 560); err != nil {
+	if err := openAppWindowSize(u, confirmWindowWidth, confirmWindowHeight); err != nil {
 		log.Printf("could not open the confirm window: %v; starting the download", err)
 		if started, err := s.m.StartPending(job.ID, "", "", false, ""); err == nil {
 			job = started

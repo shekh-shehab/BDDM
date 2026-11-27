@@ -286,6 +286,7 @@ func (d *download) setRequest(idx int, cancel context.CancelFunc) {
 	lv := d.liveLocked(idx)
 	lv.cancel = cancel
 	lv.replacing = false
+	lv.retrying = false
 	d.mu.Unlock()
 }
 

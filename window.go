@@ -13,6 +13,13 @@ import (
 const (
 	mainWindowWidth  = 900
 	mainWindowHeight = 650
+
+	// The Download File Info window first opens at this size; fit.js then
+	// sizes it to the content, between confirmFitMinWidth and confirmFitMaxWidth.
+	confirmWindowWidth  = 480
+	confirmWindowHeight = 400
+	confirmFitMinWidth  = 440
+	confirmFitMaxWidth  = 520
 )
 
 const mainWindowDefaultMarker = "main-window-default-1.5.2"

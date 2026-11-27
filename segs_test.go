@@ -285,3 +285,60 @@ func TestRowPartsRenderAndScreenshot(t *testing.T) {
 		t.Error(err)
 	}
 }
+
+// Bug 87: a part marked "retrying" must go back to "active" once a new
+// request starts and once data is written again, and the counts must match.
+func TestSegRetryingClearsWhenDataArrives(t *testing.T) {
+	f, err := os.CreateTemp(t.TempDir(), "w")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	d := &download{job: &Job{}, File: f, State: &State{Size: 200, Parts: []Part{
+		{From: 0, To: 99, Written: 100},
+		{From: 100, To: 199, Written: 20},
+	}}}
+	d.mu.Lock()
+	d.liveLocked(1).assigned = true
+	d.liveLocked(1).retrying = true
+	info := d.segSnapshotLocked()
+	d.mu.Unlock()
+	if info == nil || info.Retrying != 1 || info.Active != 0 || info.Segs[1].State != segRetry {
+		t.Fatalf("setup should be retrying: %+v", info)
+	}
+
+	d.setRequest(1, func() {})
+	d.mu.Lock()
+	info = d.segSnapshotLocked()
+	if d.liveLocked(1).retrying {
+		t.Error("a new request should clear retrying")
+	}
+	if info.Segs[1].State != segActive || info.Retrying != 0 || info.Active != 1 {
+		t.Errorf("after a new request: %+v", info)
+	}
+	if got := partsTextGo(info); got != "Parts: 1 active, 1 done" {
+		t.Errorf("text after new request: %q", got)
+	}
+	d.liveLocked(1).retrying = true
+	d.mu.Unlock()
+
+	w := &partWriter{d: d, idx: 1}
+	if n, err := w.Write([]byte("12345678")); n != 8 || err != nil {
+		t.Fatalf("write: %d %v", n, err)
+	}
+	d.mu.Lock()
+	info = d.segSnapshotLocked()
+	if d.liveLocked(1).retrying {
+		t.Error("receiving data should clear retrying")
+	}
+	if info.Segs[1].State != segActive || info.Retrying != 0 || info.Active != 1 {
+		t.Errorf("after data arrived: %+v", info)
+	}
+	if info.Segs[1].Done != 28 {
+		t.Errorf("written %d, want 28", info.Segs[1].Done)
+	}
+	if got := partsTextGo(info); got != "Parts: 1 active, 1 done" {
+		t.Errorf("text after data: %q", got)
+	}
+	d.mu.Unlock()
+}
