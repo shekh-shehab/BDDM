@@ -34,6 +34,7 @@
     let n = el, steps = 0;
     while (n && n.nodeType === 1 && steps < 16) {
       out.push({
+        tagName: (n.tagName || "").toLowerCase(),
         className: String(n.className && n.className.baseVal != null ? n.className.baseVal : n.className || ""),
         id: n.id || "",
         ariaLabel: n.getAttribute && (n.getAttribute("aria-label") || ""),
@@ -78,6 +79,7 @@
       ancestors: ancestorsOf(el),
       src: el.currentSrc || el.src || "",
       poster: el.poster || el.getAttribute("poster") || "",
+      pageUrl: location.href || "",
     };
   }
 

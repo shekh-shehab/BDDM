@@ -34,6 +34,27 @@ eq("zero is not short", t.isShortVideo(0), false);
 
 eq("show playing movie", t.shouldShowButton(vis()), true);
 eq("hide short clip", t.shouldShowButton(vis({ duration: 12 })), false);
+eq("16s YouTube Short is shown (bug 88)", t.shouldShowButton(vis({
+  duration: 16, pageUrl: "https://www.youtube.com/shorts/TGmbyMF8geU",
+})), true);
+eq("40s YouTube Short is shown", t.shouldShowButton(vis({
+  duration: 40, pageUrl: "https://www.youtube.com/shorts/x83KdajJXmA",
+})), true);
+eq("16s regular watch page stays hidden", t.shouldShowButton(vis({
+  duration: 16, pageUrl: "https://www.youtube.com/watch?v=TGmbyMF8geU",
+})), false);
+eq("16s Short detected from reel renderer tag", t.shouldShowButton(vis({
+  duration: 16, pageUrl: "https://www.youtube.com/",
+  ancestors: [{ tagName: "ytd-reel-video-renderer", className: "", id: "" }],
+})), true);
+eq("16s Instagram reel is shown", t.shouldShowButton(vis({
+  duration: 16, pageUrl: "https://www.instagram.com/reel/abc/",
+})), true);
+eq("16s TikTok is shown", t.shouldShowButton(vis({
+  duration: 16, pageUrl: "https://www.tiktok.com/@user/video/123",
+})), true);
+eq("isShortForm YouTube Shorts URL", t.isShortFormVideo({ pageUrl: "https://www.youtube.com/shorts/TGmbyMF8geU" }), true);
+eq("isShortForm not a watch page", t.isShortFormVideo({ pageUrl: "https://www.youtube.com/watch?v=TGmbyMF8geU" }), false);
 eq("hide tiny player", t.shouldShowButton(vis({ width: 120, height: 80 })), false);
 eq("hide known ad flag", t.shouldShowButton(vis({ isAd: true })), false);
 eq("hide YouTube ad-showing", t.shouldShowButton(vis({
@@ -76,6 +97,16 @@ eq("short ad in feed is not picked", t.pickActiveVideo([
   Object.assign(vis({ id: "ad", duration: 8, playing: true }), { eligible: false }),
   Object.assign(vis({ id: "main", playing: false, visibleRatio: 0.8 }), { eligible: true }),
 ], null), "main");
+// Scrolling Shorts: a paused 16s Short (YouTube's paused overlay) is still picked.
+const pausedShort = vis({
+  id: "lokey", duration: 16, playing: false, visibleRatio: 0.95,
+  pageUrl: "https://www.youtube.com/shorts/TGmbyMF8geU",
+});
+pausedShort.eligible = t.shouldShowButton(pausedShort);
+eq("paused 16s Short is eligible", pausedShort.eligible, true);
+eq("paused 16s Short is picked after scroll", t.pickActiveVideo([pausedShort], { stickyId: "prev" }), "lokey");
+const leaving = vis({ id: "prev", duration: 40, playing: false, visibleRatio: 0.05, visible: false, eligible: true });
+eq("after scrolling, the new visible Short wins over the old one", t.pickActiveVideo([leaving, pausedShort], { stickyId: "prev" }), "lokey");
 
 // --- click target: YouTube/Facebook/Instagram use the page URL (no media fragment)
 function hit(input) { return t.overlayClickTarget(input, sites.videoPageInfo); }

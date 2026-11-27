@@ -40,13 +40,28 @@
     return (visibleRatio || 0) >= 0.25;
   }
 
+  // YouTube Shorts, Instagram Reels, TikTok and Facebook Reels are often
+  // under 30 seconds on purpose. The short-clip skip is for ads and bumps
+  // on regular pages, not for these players.
+  const SHORT_FORM_TAG_RE = /^(ytd-reel-video-renderer|ytd-shorts|ytd-reel-player-overlay-renderer)$/i;
+  function isShortFormVideo(v) {
+    const url = String((v && v.pageUrl) || "");
+    if (/\/shorts\//i.test(url)) return true;
+    if (/tiktok\.com\//i.test(url)) return true;
+    if (/\/(reel|reels)\//i.test(url)) return true;
+    for (const n of (v && v.ancestors) || []) {
+      if (SHORT_FORM_TAG_RE.test(n.tagName || n.tag || "")) return true;
+    }
+    return false;
+  }
+
   // A button is offered on a visible, reasonably large video that is not
-  // an ad and not a very short clip.
+  // an ad and not a very short clip (unless it is a Short / Reel).
   function shouldShowButton(v) {
     if (!v) return false;
     if (v.isAd || looksLikeAd(v.ancestors)) return false;
     if (isTinyPlayer(v.width, v.height)) return false;
-    if (isShortVideo(v.duration)) return false;
+    if (isShortVideo(v.duration) && !isShortFormVideo(v)) return false;
     if (!isVisibleEnough(v.visibleRatio, v.width, v.height) && !v.hovered) return false;
     if (v.hidden) return false;
     return true;
@@ -121,6 +136,7 @@
     AD_CLASS_RE,
     isTinyPlayer,
     isShortVideo,
+    isShortFormVideo,
     looksLikeAd,
     isVisibleEnough,
     shouldShowButton,
