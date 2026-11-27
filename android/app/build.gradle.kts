@@ -14,12 +14,20 @@ android {
         versionCode = 160
         versionName = "1.6.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        ndk {
-            abiFilters += listOf("armeabi-v7a", "arm64-v8a")
+        // ABI splits below produce per-ABI APKs (item 98).
+    }
+
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a")
+            isUniversalApk = false
         }
     }
 
     signingConfigs {
+
         create("release") {
             val propsFile = file("/workspace/bddm-keys/keystore.properties")
             if (propsFile.exists()) {

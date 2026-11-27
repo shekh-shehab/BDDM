@@ -4,12 +4,14 @@ import android.annotation.SuppressLint
 import android.content.Intent
 import android.graphics.Bitmap
 import android.os.Bundle
+import android.view.View
 import android.view.ViewGroup
 import android.webkit.*
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
@@ -46,15 +48,25 @@ import com.shekh.bddm.ui.TextAccentDark
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 import org.json.JSONArray
 import org.json.JSONObject
+import androidx.compose.ui.graphics.asImageBitmap
 
 class BrowserActivity : ComponentActivity() {
     lateinit var store: BrowserStore
     var webView: WebView? = null
+    var customView: View? = null
+    var customCallback: WebChromeClient.CustomViewCallback? = null
+    var hideSwitcher: (() -> Unit)? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        window.setFlags(
+            android.view.WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
+            android.view.WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
+        )
         store = BrowserStore(this, BDDMApp.instance.prefs)
         store.autoCloseOldTabs()
         val startUrl = intent?.getStringExtra("query")
@@ -67,6 +79,14 @@ class BrowserActivity : ComponentActivity() {
         }
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
+                if (customView != null) {
+                    customCallback?.onCustomViewHidden()
+                    customView = null
+                    customCallback = null
+                    return
+                }
+                val closeSw = hideSwitcher
+                if (closeSw != null) { closeSw(); return }
                 val wv = webView
                 if (wv != null && wv.canGoBack()) wv.goBack() else finish()
             }
@@ -95,8 +115,14 @@ fun BrowserRoot(act: BrowserActivity) {
     val tab = tabs.getOrNull(idx) ?: tabs.first()
     var address by remember { mutableStateOf(tab.url) }
     var detected by remember { mutableStateOf(listOf<PendingDownload>()) }
+    var iframeUrls by remember { mutableStateOf(listOf<String>()) }
+    var probing by remember { mutableStateOf(false) }
     var showDetected by remember { mutableStateOf(false) }
     var showTabs by remember { mutableStateOf(false) }
+    var incognitoSpace by remember { mutableStateOf(false) }
+    var showShieldMenu by remember { mutableStateOf(false) }
+    var snack by remember { mutableStateOf<String?>(null) }
+    var fullscreenTick by remember { mutableStateOf(0) }
     var showMenu by remember { mutableStateOf(false) }
     var showBookmarks by remember { mutableStateOf(false) }
     var showHistory by remember { mutableStateOf(false) }
@@ -107,6 +133,16 @@ fun BrowserRoot(act: BrowserActivity) {
     val scope = rememberCoroutineScope()
     val ctx = LocalContext.current
     val ad = BDDMApp.instance.adBlocker
+    val snackHost = remember { SnackbarHostState() }
+    LaunchedEffect(snack) {
+        val msg = snack ?: return@LaunchedEffect
+        snackHost.showSnackbar(msg)
+        snack = null
+    }
+    androidx.compose.runtime.DisposableEffect(showTabs) {
+        act.hideSwitcher = if (showTabs) {{ showTabs = false }} else null
+        onDispose { act.hideSwitcher = null }
+    }
 
     fun load(raw: String) {
         val text = raw.trim()
@@ -123,37 +159,10 @@ fun BrowserRoot(act: BrowserActivity) {
     }
 
     BDDMTheme(prefs.theme) {
-        Scaffold { pad ->
+        Box(Modifier.fillMaxSize()) {
+        Scaffold(snackbarHost = { SnackbarHost(snackHost) }) { pad ->
             Column(Modifier.fillMaxSize().padding(pad).background(MaterialTheme.colorScheme.background)) {
-                // Vivaldi-style tab strip
-                Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    LazyRow(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        items(tabs, key = { it.id }) { t ->
-                            val i = tabs.indexOf(t)
-                            Surface(
-                                shape = RoundedCornerShape(10.dp, 10.dp, 0.dp, 0.dp),
-                                color = if (i == idx) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.surfaceVariant,
-                                modifier = Modifier.widthIn(max = 160.dp).clickable {
-                                    idx = i; store.setCurrent(i); address = t.url; tabTick++
-                                    act.webView?.loadUrl(t.url.ifBlank { "about:blank" })
-                                }
-                            ) {
-                                Row(Modifier.padding(8.dp, 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Text(t.title.ifBlank { "New tab" }, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                                    Icon(Icons.Default.Close, "Close", modifier = Modifier.size(14.dp).clickable {
-                                        store.closeTab(t.id)
-                                        idx = store.currentIndex()
-                                        tabTick++
-                                    })
-                                }
-                            }
-                        }
-                    }
-                    IconButton(onClick = { store.addTab(); idx = store.currentIndex(); address = ""; tabTick++; act.webView?.loadUrl("about:blank") }) {
-                        Icon(Icons.Default.Add, "New tab")
-                    }
-                }
-                // Address bar + shield
+                // Address bar + shield + tab count (item 101: no "N blocked" bar)
                 Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = { act.webView?.goBack() }) { Icon(Icons.Default.ArrowBack, "Back") }
                     OutlinedTextField(
@@ -167,24 +176,51 @@ fun BrowserRoot(act: BrowserActivity) {
                         keyboardActions = KeyboardActions(onGo = { load(address) }),
                     )
                     Box {
-                        IconButton(onClick = {
-                            val host = AdBlocker.hostOf(tab.url) ?: return@IconButton
-                            adOn = !prefs.adblockOnFor(host)
-                            prefs.setAdblockFor(host, adOn)
-                            act.webView?.reload()
-                        }) { Icon(Icons.Default.VerifiedUser, "Ad blocker", tint = if (adOn) SuccessDark else MutedDark) }
-                        if (blocked > 0) {
-                            Text("$blocked", fontSize = 9.sp, fontWeight = FontWeight.Bold,
-                                color = Color(0xFF052E16),
-                                modifier = Modifier.align(Alignment.TopEnd).clip(CircleShape).background(SuccessDark).padding(horizontal = 4.dp, vertical = 1.dp))
+                        IconButton(onClick = { showShieldMenu = true }) {
+                            Icon(Icons.Default.VerifiedUser, "Ad blocker", tint = if (adOn) SuccessDark else MutedDark)
+                        }
+                        DropdownMenu(showShieldMenu, { showShieldMenu = false }) {
+                            val host = AdBlocker.hostOf(tab.url)
+                            Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp).widthIn(min = 240.dp)) {
+                                Text(if (blocked > 0) "$blocked blocked on this page" else "No requests blocked", fontWeight = FontWeight.Medium)
+                                if (host != null) {
+                                    Text(host, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Text("Block ads on this site", modifier = Modifier.weight(1f), fontSize = 14.sp)
+                                        Switch(checked = adOn, onCheckedChange = {
+                                            adOn = it
+                                            prefs.setAdblockFor(host, it)
+                                            act.webView?.reload()
+                                        })
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    IconButton(onClick = {
+                        captureCurrent(act, tab.id)
+                        incognitoSpace = tab.incognito
+                        showTabs = true
+                    }) {
+                        Box(
+                            Modifier.size(26.dp).clip(RoundedCornerShape(6.dp))
+                                .border(1.5.dp, MaterialTheme.colorScheme.onSurface, RoundedCornerShape(6.dp)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text("${tabs.size}", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                     IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, "Menu") }
                     DropdownMenu(showMenu, { showMenu = false }) {
+                        DropdownMenuItem(text = { Text("New tab") }, onClick = {
+                            showMenu = false; store.addTab(); idx = store.currentIndex(); address = ""; tabTick++
+                        })
                         DropdownMenuItem(text = { Text("New incognito tab") }, onClick = {
                             showMenu = false; store.addTab(incognito = true); idx = store.currentIndex(); address = ""; tabTick++
                         })
-                        DropdownMenuItem(text = { Text("Tabs overview") }, onClick = { showMenu = false; showTabs = true })
+                        DropdownMenuItem(text = { Text("Tabs") }, onClick = {
+                            showMenu = false; captureCurrent(act, tab.id); incognitoSpace = tab.incognito; showTabs = true
+                        })
                         DropdownMenuItem(text = { Text("Bookmarks") }, onClick = { showMenu = false; showBookmarks = true })
                         DropdownMenuItem(text = { Text("History") }, onClick = { showMenu = false; showHistory = true })
                         DropdownMenuItem(text = { Text("Bookmark this page") }, onClick = {
@@ -197,24 +233,6 @@ fun BrowserRoot(act: BrowserActivity) {
                         })
                     }
                 }
-                val host = AdBlocker.hostOf(tab.url)
-                if (prefs.adBlocker && host != null && tab.url.startsWith("http")) {
-                    Row(
-                        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)
-                            .clip(RoundedCornerShape(12.dp)).background(Color(0xFF1D3A2D)).padding(8.dp, 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(Icons.Default.VerifiedUser, null, tint = SuccessDark, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text("$blocked blocked", color = SuccessDark, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
-                            Text(if (adOn) "Ad blocker on for $host" else "Ad blocker off for $host", color = SuccessDark, fontSize = 11.sp)
-                        }
-                        Switch(checked = adOn, onCheckedChange = {
-                            adOn = it; prefs.setAdblockFor(host, it); act.webView?.reload()
-                        })
-                    }
-                }
                 Box(Modifier.weight(1f)) {
                     key(tab.id, tabTick) {
                         AndroidView(factory = { c ->
@@ -222,13 +240,16 @@ fun BrowserRoot(act: BrowserActivity) {
                                 act.webView = this
                                 layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
                                 settings.javaScriptEnabled = true
-                                settings.domStorageEnabled = !tab.incognito
+                                settings.domStorageEnabled = true
+                                settings.databaseEnabled = true
                                 settings.mediaPlaybackRequiresUserGesture = false
                                 settings.allowFileAccess = false
-                                settings.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
-                                settings.userAgentString = settings.userAgentString.replace("; wv", "")
+                                settings.loadsImagesAutomatically = true
+                                settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                                settings.userAgentString = FilterEngine.chromeLikeUa(settings.userAgentString)
+                                setLayerType(View.LAYER_TYPE_HARDWARE, null)
                                 cookie(tab.incognito)
-                                addJavascriptInterface(DetectBridge { list -> detected = list }, "BDDM")
+                                addJavascriptInterface(DetectBridge { list -> detected = list; iframeUrls = list.filter { it.subtitle == "iframe" }.map { it.url } }, "BDDM")
                                 webViewClient = object : WebViewClient() {
                                     override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
                                         val pageHost = AdBlocker.hostOf(tab.url) ?: request.url.host ?: ""
@@ -238,6 +259,7 @@ fun BrowserRoot(act: BrowserActivity) {
                                         ad.resetPageCount()
                                         blocked = 0
                                         detected = emptyList()
+                                        iframeUrls = emptyList()
                                         if (url != null && url.startsWith("http")) {
                                             address = url
                                             tab.url = url
@@ -254,17 +276,16 @@ fun BrowserRoot(act: BrowserActivity) {
                                             if (!tab.incognito) store.addHistory(tab.title, url)
                                         }
                                         view?.evaluateJavascript(DETECT_JS, null)
-                                        // Always offer the page itself on known video sites.
-                                        if (url != null && YtDlp.isSitePage(url)) {
-                                            val already = detected.any { it.url == url }
-                                            if (!already) {
-                                                detected = listOf(PendingDownload(url, view?.title ?: url, "Page video", kind = PendingDownload.Kind.Video)) + detected
-                                            }
-                                        }
+                                        view?.postDelayed({
+                                            val bmp = view.let { TabThumbs.capture(it) }
+                                            if (bmp != null) TabThumbs.saveThumb(act, tab.id, bmp)
+                                        }, 400)
                                     }
                                     override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                                         val u = request?.url?.toString() ?: return false
-                                        if (u.startsWith("http")) return false
+                                        // about:blank, blob: and data: are used by JW Player and other embeds.
+                                        if (u.startsWith("http") || u.startsWith("blob:") || u.startsWith("data:") ||
+                                            u.startsWith("about:") || u.startsWith("javascript:")) return false
                                         return true
                                     }
                                 }
@@ -272,24 +293,58 @@ fun BrowserRoot(act: BrowserActivity) {
                                     override fun onCreateWindow(view: WebView?, isDialog: Boolean, isUserGesture: Boolean, resultMsg: android.os.Message?): Boolean {
                                         if (prefs.blockPopups && !isUserGesture) return false
                                         if (prefs.blockPopups && isDialog) return false
-                                        return false // open in a new tab via onCreateWindow is complex; block popups
+                                        return false
                                     }
                                     override fun onReceivedTitle(view: WebView?, title: String?) {
                                         if (!title.isNullOrBlank()) tab.title = title
+                                    }
+                                    override fun onReceivedIcon(view: WebView?, icon: Bitmap?) {
+                                        if (icon != null) TabThumbs.saveFavicon(act, tab.id, icon)
+                                    }
+                                    override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
+                                        act.customView = view
+                                        act.customCallback = callback
+                                        fullscreenTick++
+                                    }
+                                    override fun onHideCustomView() {
+                                        act.customView = null
+                                        act.customCallback?.onCustomViewHidden()
+                                        act.customCallback = null
+                                        fullscreenTick++
+                                    }
+                                    override fun onPermissionRequest(request: PermissionRequest?) {
+                                        val req = request ?: return
+                                        val grant = req.resources.filter { it == PermissionRequest.RESOURCE_PROTECTED_MEDIA_ID }
+                                        if (grant.isNotEmpty()) req.grant(grant.toTypedArray()) else req.deny()
                                     }
                                 }
                                 loadUrl(tab.url.ifBlank { "about:blank" })
                             }
                         }, modifier = Modifier.fillMaxSize(), update = { wv -> act.webView = wv })
                     }
-                    if (detected.isNotEmpty()) {
-                        FloatingActionButton(
-                            onClick = { showDetected = true },
-                            modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp, 16.dp),
-                            containerColor = TextAccentDark,
-                        ) {
-                            Box {
+                    FloatingActionButton(
+                        onClick = {
+                            if (probing) return@FloatingActionButton
+                            if (detected.isNotEmpty()) {
+                                showDetected = true
+                            } else {
+                                probing = true
+                                scope.launch {
+                                    findVideosOnPage(act.webView, tab.url, tab.title, iframeUrls)
+                                    probing = false
+                                }
+                            }
+                        },
+                        modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp, 16.dp),
+                        containerColor = TextAccentDark,
+                    ) {
+                        Box {
+                            if (probing) {
+                                CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp, color = Color.White)
+                            } else {
                                 Icon(Icons.Default.Download, "Download")
+                            }
+                            if (detected.isNotEmpty() && !probing) {
                                 Text("${detected.size}", fontSize = 10.sp, fontWeight = FontWeight.Bold,
                                     modifier = Modifier.align(Alignment.TopEnd).offset(8.dp, (-8).dp)
                                         .clip(CircleShape).background(Color.White).padding(horizontal = 5.dp))
@@ -335,30 +390,53 @@ fun BrowserRoot(act: BrowserActivity) {
             )
         }
         if (showTabs) {
-            AlertDialog(
-                onDismissRequest = { showTabs = false },
-                title = { Text("Tabs") },
-                text = {
-                    LazyColumn {
-                        items(tabs.size) { i ->
-                            val t = tabs[i]
-                            ListItem(
-                                headlineContent = { Text(t.title.ifBlank { "New tab" }, maxLines = 1) },
-                                supportingContent = { Text(if (t.incognito) "Incognito · ${t.url}" else t.url, maxLines = 1, fontSize = 12.sp) },
-                                modifier = Modifier.clickable {
-                                    idx = i; store.setCurrent(i); address = t.url; tabTick++; showTabs = false
-                                    act.webView?.loadUrl(t.url.ifBlank { "about:blank" })
-                                },
-                                trailingContent = {
-                                    IconButton(onClick = { store.closeTab(t.id); idx = store.currentIndex(); tabTick++ }) {
-                                        Icon(Icons.Default.Close, null)
-                                    }
-                                },
-                            )
-                        }
+            val thumbs = tabs.associate { it.id to TabThumbs.loadThumb(ctx, it.id) }
+            val favs = tabs.associate { it.id to TabThumbs.loadFavicon(ctx, it.id) }
+            TabSwitcher(
+                tabs = tabs.toList(),
+                currentId = tab.id,
+                incognitoSpace = incognitoSpace,
+                thumbs = thumbs,
+                favicons = favs,
+                onSelect = { tSel ->
+                    val i = tabs.indexOfFirst { it.id == tSel.id }
+                    if (i >= 0) {
+                        idx = i; store.setCurrent(i); address = tSel.url; tabTick++
                     }
+                    showTabs = false
                 },
-                confirmButton = { TextButton(onClick = { showTabs = false }) { Text("Close") } },
+                onClose = { tSel ->
+                    TabThumbs.delete(ctx, tSel.id)
+                    store.closeTab(tSel.id)
+                    idx = store.currentIndex()
+                    address = store.tabs.getOrNull(idx)?.url ?: ""
+                    tabTick++
+                },
+                onNewTab = { incog ->
+                    store.addTab(incognito = incog)
+                    idx = store.currentIndex()
+                    address = ""
+                    tabTick++
+                    showTabs = false
+                },
+                onCloseAll = {
+                    val gone = store.tabs.filter { it.incognito == incognitoSpace }
+                    gone.forEach { TabThumbs.delete(ctx, it.id) }
+                    store.closeAll(incognitoOnly = incognitoSpace)
+                    idx = store.currentIndex()
+                    address = store.tabs.getOrNull(idx)?.url ?: ""
+                    tabTick++
+                    showTabs = false
+                },
+                onCloseOthers = {
+                    store.tabs.filter { it.id != tab.id }.forEach { TabThumbs.delete(ctx, it.id) }
+                    store.closeOthers(tab.id)
+                    idx = store.currentIndex()
+                    tabTick++
+                },
+                onDismiss = { showTabs = false },
+                onToggleIncognitoSpace = { incognitoSpace = !incognitoSpace },
+                onMessage = { snack = it },
             )
         }
         if (showBookmarks) {
@@ -409,6 +487,14 @@ fun BrowserRoot(act: BrowserActivity) {
                 dismissButton = { TextButton(onClick = { store.clearHistory(); showHistory = false }) { Text("Clear") } },
             )
         }
+        val fs = act.customView
+        if (fs != null && fullscreenTick >= 0) {
+            AndroidView(factory = {
+                (fs.parent as? ViewGroup)?.removeView(fs)
+                fs
+            }, modifier = Modifier.fillMaxSize(), update = {})
+        }
+        }
     }
 }
 
@@ -436,11 +522,84 @@ private fun DetectedSheet(items: List<PendingDownload>, onDismiss: () -> Unit, o
 
 private fun WebView.cookie(incognito: Boolean) {
     val cm = CookieManager.getInstance()
-    // CookieManager is process-wide, so do not turn cookies off globally for incognito.
-    cm.setAcceptThirdPartyCookies(this, !incognito)
+    cm.setAcceptCookie(true)
+    // Third-party cookies are required for embedded players (JW Player, YouTube embeds).
+    // History is still not recorded for incognito tabs.
+    cm.setAcceptThirdPartyCookies(this, true)
     if (incognito) {
         settings.cacheMode = WebSettings.LOAD_NO_CACHE
-        settings.domStorageEnabled = false
+    }
+    settings.domStorageEnabled = true
+}
+
+private fun captureCurrent(act: BrowserActivity, tabId: String) {
+    val wv = act.webView ?: return
+    val bmp = TabThumbs.capture(wv) ?: return
+    TabThumbs.saveThumb(act, tabId, bmp)
+}
+
+private suspend fun findVideosOnPage(wv: WebView?, pageUrl: String, pageTitle: String, knownIframes: List<String>) {
+    val urls = LinkedHashSet<String>()
+    if (pageUrl.startsWith("http")) urls.add(pageUrl)
+    knownIframes.filter { it.startsWith("http") }.forEach { urls.add(it) }
+    val fromJs = kotlinx.coroutines.suspendCancellableCoroutine<List<String>> { cont ->
+        val view = wv
+        if (view == null) { cont.resume(emptyList()); return@suspendCancellableCoroutine }
+        view.post {
+            view.evaluateJavascript(IFRAME_JS) { raw ->
+                val list = parseJsStringList(raw)
+                if (cont.isActive) cont.resume(list)
+            }
+        }
+    }
+    fromJs.filter { it.startsWith("http") }.forEach { urls.add(it) }
+    var any = false
+    if (!YtDlp.ready) {
+        urls.forEach { u ->
+            PendingQueue.add(PendingDownload(u, pageTitle.ifBlank { u }, "Page", kind = PendingDownload.Kind.Video))
+            any = true
+        }
+        return
+    }
+    for (u in urls) {
+        try {
+            val info = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { YtDlp.probe(u) }
+            if (info.formats.isNotEmpty() || info.title.isNotBlank()) {
+                PendingQueue.add(
+                    PendingDownload(
+                        url = u,
+                        title = info.title.ifBlank { pageTitle }.ifBlank { u },
+                        subtitle = info.site + if (info.duration.isNotBlank()) " · ${info.duration}" else "",
+                        kind = PendingDownload.Kind.Video,
+                        formats = info.formats,
+                    )
+                )
+                any = true
+            }
+        } catch (_: Throwable) {}
+    }
+    if (!any && pageUrl.startsWith("http")) {
+        PendingQueue.add(PendingDownload(pageUrl, pageTitle.ifBlank { pageUrl }, "Page", kind = PendingDownload.Kind.Video))
+    }
+}
+
+private fun parseJsStringList(raw: String?): List<String> {
+    if (raw.isNullOrBlank() || raw == "null") return emptyList()
+    var s = raw.trim()
+    if (s.length >= 2 && s.first() == '"' && s.last() == '"') {
+        s = org.json.JSONTokener(s).nextValue()?.toString() ?: s
+        // If the WebView already returned a JSON array literal, nextValue yields the array.
+        // Fall through to JSONArray below on the original or decoded form.
+    }
+    val json = if (s.startsWith("[")) s else raw.trim().trim('"')
+    return try {
+        val a = org.json.JSONArray(json)
+        (0 until a.length()).mapNotNull { i -> a.optString(i).takeIf { u -> u.isNotBlank() } }
+    } catch (_: Exception) {
+        try {
+            val a = org.json.JSONArray(raw)
+            (0 until a.length()).mapNotNull { i -> a.optString(i).takeIf { u -> u.isNotBlank() } }
+        } catch (_: Exception) { emptyList() }
     }
 }
 
@@ -488,7 +647,20 @@ private const val DETECT_JS = """
       var h=(a.href||'').toLowerCase();
       if (/\.(mp4|webm|mkv|m3u8|mpd)(\?|$)/.test(h)) add(a.href, a.textContent||document.title, 'link');
     });
+    document.querySelectorAll('iframe[src]').forEach(function(f){
+      add(f.src, document.title, 'iframe');
+    });
     if (window.BDDM && BDDM.found) BDDM.found(JSON.stringify(out.slice(0, 25)));
   } catch(e){}
+})();
+"""
+
+private const val IFRAME_JS = """
+(function(){
+  try {
+    var a=[];
+    document.querySelectorAll('iframe[src]').forEach(function(f){ if(f.src) a.push(f.src); });
+    return JSON.stringify(a.slice(0, 20));
+  } catch(e){ return "[]"; }
 })();
 """

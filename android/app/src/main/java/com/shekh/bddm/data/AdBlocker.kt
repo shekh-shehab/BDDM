@@ -15,9 +15,7 @@ import java.util.concurrent.atomic.AtomicInteger
  * Cosmetic rules are skipped. Lists auto-update daily when enabled.
  */
 class AdBlocker(private val ctx: Context, private val prefs: Prefs) {
-    private val hosts = HashSet<String>()
-    private val exceptions = HashSet<String>()
-    private val pathRules = ArrayList<Pair<String, String>>() // host-or-* to path contains
+    private val engine = FilterEngine()
     @Volatile private var loaded = false
     val blockedOnPage = AtomicInteger(0)
 
@@ -26,7 +24,7 @@ class AdBlocker(private val ctx: Context, private val prefs: Prefs) {
     fun loadAsync() {
         Executors.newSingleThreadExecutor().execute {
             loadFromDisk()
-            if (hosts.isEmpty()) loadBuiltIn()
+            if (engine.isEmpty()) loadBuiltIn()
             loaded = true
             if (prefs.filterListAutoUpdate) maybeUpdate()
         }
@@ -34,16 +32,15 @@ class AdBlocker(private val ctx: Context, private val prefs: Prefs) {
 
     @Synchronized
     private fun loadFromDisk() {
-        hosts.clear(); exceptions.clear(); pathRules.clear()
+        engine.clear()
         listOf("easylist.txt", "easyprivacy.txt").forEach { name ->
             val f = File(dir, name)
-            if (f.isFile) parse(f.readText())
+            if (f.isFile) engine.addRules(f.readText())
         }
     }
 
     private fun loadBuiltIn() {
-        // A compact starter list so blocking works before the full lists arrive.
-        BUILTIN.split('\n').forEach { addRule(it) }
+        engine.addRules(BUILTIN)
     }
 
     private fun maybeUpdate() {
@@ -71,72 +68,25 @@ class AdBlocker(private val ctx: Context, private val prefs: Prefs) {
     }
 
     @Synchronized
-    private fun parse(text: String) {
-        text.lineSequence().forEach { addRule(it) }
-    }
-
-    private fun addRule(raw: String) {
-        var line = raw.trim()
-        if (line.isEmpty() || line.startsWith("!") || line.startsWith("[") || line.contains("##") || line.contains("#@#")) return
-        if (line.startsWith("@@")) {
-            val h = hostFrom(line.removePrefix("@@")) ?: return
-            exceptions.add(h)
-            return
-        }
-        if (line.startsWith("||")) {
-            val rest = line.removePrefix("||")
-            val cut = rest.indexOfAny(charArrayOf('^', '/', '$'))
-            val host = (if (cut >= 0) rest.substring(0, cut) else rest).lowercase().trim('.')
-            if (host.isEmpty() || host.contains("*")) return
-            if (cut >= 0 && rest.getOrNull(cut) == '/') {
-                val path = rest.substring(cut).substringBefore('$')
-                pathRules.add(host to path)
-            } else {
-                hosts.add(host)
-            }
-        }
-    }
-
-    private fun hostFrom(rule: String): String? {
-        val s = rule.removePrefix("||")
-        val cut = s.indexOfAny(charArrayOf('^', '/', '$'))
-        val h = (if (cut >= 0) s.substring(0, cut) else s).lowercase().trim('.')
-        return h.ifEmpty { null }
-    }
-
-    fun shouldBlock(url: String, pageHost: String, isThirdParty: Boolean): Boolean {
+    fun shouldBlock(url: String, pageHost: String, isThirdParty: Boolean, isMainFrame: Boolean = false): Boolean {
         if (!prefs.adBlocker || !prefs.adblockOnFor(pageHost)) return false
-        val u = url.lowercase()
-        val host = hostOf(u) ?: return false
-        if (exceptions.contains(host) || exceptions.any { host.endsWith(".$it") }) return false
-        if (matchHost(host)) return true
-        if (prefs.blockTrackers && isThirdParty && TRACKERS.any { host == it || host.endsWith(".$it") }) return true
-        synchronized(this) {
-            for ((h, path) in pathRules) {
-                if (host == h || host.endsWith(".$h")) {
-                    if (u.contains(path.lowercase())) return true
-                }
-            }
-        }
+        val host = FilterEngine.hostOf(url) ?: return false
+        if (engine.isAllowlisted(host)) return false
+        if (engine.shouldBlock(url, pageHost, isThirdParty, isMainFrame)) return true
+        if (prefs.blockTrackers && isThirdParty && !isMainFrame &&
+            FilterEngine.inSet(host, TRACKERS) && !engine.isAllowlisted(host)
+        ) return true
         return false
     }
 
-    private fun matchHost(host: String): Boolean {
-        var h = host
-        while (true) {
-            if (hosts.contains(h)) return true
-            val i = h.indexOf('.')
-            if (i <= 0) return false
-            h = h.substring(i + 1)
-        }
-    }
-
     fun intercept(request: WebResourceRequest, pageHost: String): WebResourceResponse? {
+        if (request.isForMainFrame) return null
         val url = request.url?.toString() ?: return null
         val reqHost = request.url.host ?: ""
         val third = reqHost.isNotEmpty() && pageHost.isNotEmpty() &&
-            !reqHost.equals(pageHost, true) && !reqHost.endsWith(".$pageHost")
-        if (shouldBlock(url, pageHost, third)) {
+            !reqHost.equals(pageHost, true) && !reqHost.endsWith(".$pageHost") &&
+            !pageHost.endsWith(".$reqHost")
+        if (shouldBlock(url, pageHost, third, isMainFrame = false)) {
             blockedOnPage.incrementAndGet()
             return emptyResponse()
         }
@@ -172,12 +122,7 @@ class AdBlocker(private val ctx: Context, private val prefs: Prefs) {
 ||google-analytics.com^
 ||googletagmanager.com^
 """
-        fun hostOf(url: String): String? {
-            return try {
-                val s = if (url.contains("://")) url else "https://$url"
-                URL(s).host?.lowercase()
-            } catch (_: Exception) { null }
-        }
+        fun hostOf(url: String): String? = FilterEngine.hostOf(url)
         fun emptyResponse(): WebResourceResponse {
             return WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream(ByteArray(0)))
         }

@@ -40,6 +40,24 @@ class BrowserStore(ctx: Context, private val prefs: Prefs) {
         saveTabs()
     }
 
+    fun closeAll(incognitoOnly: Boolean? = null) {
+        tabs = when (incognitoOnly) {
+            true -> tabs.filter { !it.incognito }.toMutableList()
+            false -> tabs.filter { it.incognito }.toMutableList()
+            null -> mutableListOf()
+        }
+        if (tabs.isEmpty()) addTab(incognito = incognitoOnly == true)
+        setCurrent(tabs.lastIndex)
+        saveTabs()
+    }
+
+    fun closeOthers(keepId: String) {
+        tabs = tabs.filter { it.id == keepId }.toMutableList()
+        if (tabs.isEmpty()) addTab()
+        setCurrent(0)
+        saveTabs()
+    }
+
     fun touch(tab: TabState) {
         tab.lastUsed = System.currentTimeMillis()
         saveTabs()
