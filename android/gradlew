@@ -1,0 +1,8 @@
+#!/usr/bin/env sh
+# BDDM Gradle startup (POSIX)
+APP_HOME=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+if [ -x /tmp/gradle-8.7/bin/gradle ]; then
+  exec /tmp/gradle-8.7/bin/gradle -p "$APP_HOME" "$@"
+fi
+WRAPPER="$APP_HOME/gradle/wrapper/gradle-wrapper.jar"
+exec java -Xmx64m -Xms64m -cp "$WRAPPER" org.gradle.wrapper.GradleWrapperMain "$@"

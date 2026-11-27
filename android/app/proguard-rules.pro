@@ -1,0 +1,5 @@
+-keep class com.shekh.bddm.core.mobile.** { *; }
+-keep class go.** { *; }
+-keep class com.yausername.** { *; }
+-keep class com.orpheusdroid.** { *; }
+-dontwarn com.yausername.**
