@@ -942,3 +942,10 @@ func TestOtherPopupsFitHeight(t *testing.T) {
 		}
 	}
 }
+
+func execChromeDump(chrome, url string, w, h int) *exec.Cmd {
+	cmd := exec.Command(chrome, "--headless=new", "--disable-gpu", "--no-sandbox", "--hide-scrollbars",
+		"--window-size="+strconv.Itoa(w)+","+strconv.Itoa(h), "--virtual-time-budget=5000", "--dump-dom", url)
+	cmd.Env = append(os.Environ(), "DBUS_SESSION_BUS_ADDRESS=")
+	return cmd
+}

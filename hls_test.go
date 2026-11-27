@@ -190,7 +190,7 @@ func TestHLSSegmentRetry(t *testing.T) {
 	keys := &hlsKeyCache{m: m, j: j, got: map[string][]byte{}}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	if err := m.downloadHLSSeg(ctx, j, keys, hlsSeg{URL: srv.URL + "/seg.ts", Seq: 1}, path, false); err != nil {
+	if err := m.downloadHLSSeg(ctx, j, keys, hlsSeg{URL: srv.URL + "/seg.ts", Seq: 1}, path, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	if hits.Load() < 3 {

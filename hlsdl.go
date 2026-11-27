@@ -466,6 +466,13 @@ func (m *Manager) downloadHLSList(ctx context.Context, j *Job, keys *hlsKeyCache
 		workers = n
 	}
 
+	label := "video"
+	if prefix == "a" {
+		label = "audio"
+	}
+	hp := newHLSProgress(j, label, done)
+	stopProg := hp.start()
+	defer stopProg()
 	sem := make(chan struct{}, workers)
 	errCh := make(chan error, 1)
 	var wg sync.WaitGroup
@@ -497,7 +504,8 @@ func (m *Manager) downloadHLSList(ctx context.Context, j *Job, keys *hlsKeyCache
 			defer wg.Done()
 			defer func() { <-sem }()
 			path := hlsSegPath(work, prefix, i)
-			err := m.downloadHLSSeg(ctx, j, keys, seg, path, hidden)
+			hp.set(i, fragBusy)
+			err := m.downloadHLSSeg(ctx, j, keys, seg, path, hidden, func() { hp.set(i, fragRetry) })
 			if err != nil {
 				if j.skipFrags && ctx.Err() == nil && !isNetErr(err) {
 					log.Printf("[%s] skipping fragment %d: %v", j.Name, i+1, err)
@@ -506,6 +514,7 @@ func (m *Manager) downloadHLSList(ctx context.Context, j *Job, keys *hlsKeyCache
 					mu.Lock()
 					done[i] = true
 					mu.Unlock()
+					hp.set(i, fragDone)
 					return
 				}
 				select {
@@ -519,6 +528,7 @@ func (m *Manager) downloadHLSList(ctx context.Context, j *Job, keys *hlsKeyCache
 			finished++
 			got := finished
 			mu.Unlock()
+			hp.set(i, fragDone)
 			_ = saveHLSState(work, st)
 			j.setMessage("Downloading (%d / %d)...", got, total)
 		}()
@@ -555,7 +565,7 @@ func ctxErr(err error) bool {
 	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
-func (m *Manager) downloadHLSSeg(ctx context.Context, j *Job, keys *hlsKeyCache, seg hlsSeg, path string, hidden bool) error {
+func (m *Manager) downloadHLSSeg(ctx context.Context, j *Job, keys *hlsKeyCache, seg hlsSeg, path string, hidden bool, onRetry func()) error {
 	var last error
 	for try := 1; try <= hlsSegTries; try++ {
 		if err := ctx.Err(); err != nil {
@@ -573,6 +583,9 @@ func (m *Manager) downloadHLSSeg(ctx context.Context, j *Job, keys *hlsKeyCache,
 			return err
 		}
 		wait := backoff(try)
+		if onRetry != nil {
+			onRetry()
+		}
 		j.setMessage("Segment retry (%s); continuing in %s...", shortReason(err), wait)
 		select {
 		case <-ctx.Done():

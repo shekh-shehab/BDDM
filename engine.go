@@ -287,9 +287,11 @@ type Job struct {
 	finished   chan struct{}
 	stopReason string
 
-	liveMu  sync.Mutex
-	label   string  // name used in log lines
-	speed   float64 // bytes per second
+	liveMu sync.Mutex
+
+	segs    *SegInfo // real per-part progress for the row (segs.go); guarded by liveMu
+	label   string   // name used in log lines
+	speed   float64  // bytes per second
 	message string
 	msgTime time.Time
 	// xferStart/xferFrom: when the data transfer began and how much was
@@ -336,37 +338,38 @@ func (j *Job) displayName() string {
 
 // JobView is what the UI receives.
 type JobView struct {
-	ID         string  `json:"id"`
-	URL        string  `json:"url"`
-	Name       string  `json:"name"`
-	Dir        string  `json:"dir"`
-	Size       int64   `json:"size"`
-	Done       int64   `json:"done"`
-	Speed      float64 `json:"speed"`
-	ETA        int64   `json:"eta"` // seconds, -1 = unknown
-	Status     string  `json:"status"`
-	Error      string  `json:"error,omitempty"`
-	Message    string  `json:"message,omitempty"`
-	Started    string  `json:"started"`
-	Finished   string  `json:"finished,omitempty"`
-	Removed    bool    `json:"removed,omitempty"`
-	Kind       string  `json:"kind,omitempty"`
-	Group      string  `json:"group,omitempty"`
-	QueuePos   int     `json:"queuePos,omitempty"` // Queued: place in the queue (1 = next)
-	QueueLen   int     `json:"queueLen,omitempty"`
-	ViewOnly   bool    `json:"viewOnly,omitempty"`   // Google Drive: the owner turned off downloading
-	HandedBack bool    `json:"handedBack,omitempty"` // Error: the browser downloads it instead (item 18)
-	Reason     string  `json:"reason,omitempty"`     // Error: what went wrong, in plain words
-	Fix        string  `json:"fix,omitempty"`        // Error: what to do about it
-	Checked    string  `json:"checked,omitempty"`    // checksum result ("SHA-256 matches ...")
-	NetWait    bool    `json:"netWait,omitempty"`    // waiting for the internet connection
-	Mirrors    int     `json:"mirrors,omitempty"`    // extra links
-	Peers      int     `json:"peers,omitempty"`      // torrent: connected peers
-	UpSpeed    float64 `json:"upSpeed,omitempty"`    // torrent: upload bytes/s
-	Files      int     `json:"files,omitempty"`      // torrent: number of files
-	Uploaded   int64   `json:"uploaded,omitempty"`   // torrent: bytes uploaded
-	DlLimit    *int64  `json:"dlLimit,omitempty"`
-	UlLimit    *int64  `json:"ulLimit,omitempty"`
+	ID         string   `json:"id"`
+	URL        string   `json:"url"`
+	Name       string   `json:"name"`
+	Dir        string   `json:"dir"`
+	Size       int64    `json:"size"`
+	Done       int64    `json:"done"`
+	Speed      float64  `json:"speed"`
+	ETA        int64    `json:"eta"` // seconds, -1 = unknown
+	Status     string   `json:"status"`
+	Error      string   `json:"error,omitempty"`
+	Message    string   `json:"message,omitempty"`
+	Started    string   `json:"started"`
+	Finished   string   `json:"finished,omitempty"`
+	Removed    bool     `json:"removed,omitempty"`
+	Kind       string   `json:"kind,omitempty"`
+	Group      string   `json:"group,omitempty"`
+	QueuePos   int      `json:"queuePos,omitempty"` // Queued: place in the queue (1 = next)
+	QueueLen   int      `json:"queueLen,omitempty"`
+	ViewOnly   bool     `json:"viewOnly,omitempty"`   // Google Drive: the owner turned off downloading
+	HandedBack bool     `json:"handedBack,omitempty"` // Error: the browser downloads it instead (item 18)
+	Segs       *SegInfo `json:"segs,omitempty"`       // per-part / per-fragment progress (item 79)
+	Reason     string   `json:"reason,omitempty"`     // Error: what went wrong, in plain words
+	Fix        string   `json:"fix,omitempty"`        // Error: what to do about it
+	Checked    string   `json:"checked,omitempty"`    // checksum result ("SHA-256 matches ...")
+	NetWait    bool     `json:"netWait,omitempty"`    // waiting for the internet connection
+	Mirrors    int      `json:"mirrors,omitempty"`    // extra links
+	Peers      int      `json:"peers,omitempty"`      // torrent: connected peers
+	UpSpeed    float64  `json:"upSpeed,omitempty"`    // torrent: upload bytes/s
+	Files      int      `json:"files,omitempty"`      // torrent: number of files
+	Uploaded   int64    `json:"uploaded,omitempty"`   // torrent: bytes uploaded
+	DlLimit    *int64   `json:"dlLimit,omitempty"`
+	UlLimit    *int64   `json:"ulLimit,omitempty"`
 }
 
 func (j *Job) viewLocked() JobView {
@@ -390,6 +393,7 @@ func (j *Job) viewLocked() JobView {
 			}
 		}
 	}
+	v.Segs = j.segsFor(j.Status)
 	if j.Status == StatusDone && j.Size > 0 {
 		v.Done = j.Size
 	}
@@ -1182,6 +1186,7 @@ func (m *Manager) startLocked(j *Job) {
 	j.HandedBack = false
 	j.Checked = ""
 	j.liveMu.Lock()
+	j.segs = nil
 	j.speed = 0
 	j.xferStart = time.Time{}
 	j.restarts = 0
@@ -2140,6 +2145,7 @@ var errPartDone = errors.New("part reached its end")
 // partLive is runtime-only information about one part (not saved).
 type partLive struct {
 	assigned bool      // a connection is working on it
+	retrying bool      // its connection failed or was replaced: reconnecting (shown in the row)
 	reserved int64     // end (exclusive) of a write in progress, 0 = none
 	since    time.Time // when the current connection took it
 	got      int64     // bytes since then (for its speed)
@@ -2657,6 +2663,7 @@ func (d *download) downloadPart(ctx context.Context, idx int) error {
 			if rlCount > 30 {
 				return fmt.Errorf("part %d: server kept refusing (too many requests)", idx+1)
 			}
+			d.markRetrying(idx)
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -2669,6 +2676,7 @@ func (d *download) downloadPart(ctx context.Context, idx int) error {
 		}
 		if errors.Is(err, errReplaced) {
 			try-- // a slow connection was closed on purpose: just reconnect
+			d.markRetrying(idx)
 			continue
 		}
 		// A mirror that fails is dropped; the part goes to another link.
@@ -2701,6 +2709,7 @@ func (d *download) downloadPart(ctx context.Context, idx int) error {
 		lastErr = err
 		wait := backoff(try)
 		d.job.setMessage("Part %d: %v; retrying in %s (%d/%d)...", idx+1, err, wait, try, maxTries)
+		d.markRetrying(idx)
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -2958,11 +2967,13 @@ func (d *download) progressLoop(stop <-chan struct{}, size int64) {
 	)
 	ticker := time.NewTicker(stateInterval)
 	defer ticker.Stop()
+	d.publishSegs()
 	for {
 		select {
 		case <-stop:
 			return
 		case <-ticker.C:
+			d.publishSegs()
 			cur := d.job.done.Load()
 			instant := float64(cur - lastDone) // bytes in the last second
 			if instant < 0 {
