@@ -29,7 +29,7 @@ import (
 const port = "9614"
 
 // appVersion is the BDDM version shown in Settings and on the update notice.
-const appVersion = "1.5.9"
+const appVersion = "1.5.10"
 
 func main() {
 	runtime.LockOSThread()
