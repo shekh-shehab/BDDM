@@ -504,6 +504,7 @@ type Manager struct {
 	tools     *Tools
 
 	driveFolders map[string]*driveFolder // Google Drive folders waiting in their window
+	profiles     map[string]*profileList // profile/page media lists waiting in their window (profile.go)
 	groups       []*Group                // folder downloads (groups.go)
 	ann          announcer               // toasts / notifications (groups.go)
 

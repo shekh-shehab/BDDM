@@ -80,6 +80,8 @@ func windowTitleForURL(u string) string {
 		return "Download Google Drive folder"
 	case strings.HasSuffix(p, "/torrent.html"):
 		return "Add torrent"
+	case strings.HasSuffix(p, "/profile.html"):
+		return "Download profile media"
 	}
 	return "BDDM - Download Manager"
 }

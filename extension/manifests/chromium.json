@@ -31,6 +31,17 @@
     },
     {
       "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "compat.js",
+        "collect.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
         "https://drive.google.com/*",
         "https://docs.google.com/*"
       ],

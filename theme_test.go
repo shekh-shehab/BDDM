@@ -153,7 +153,7 @@ func TestThemeAppliesToEveryWindow(t *testing.T) {
 	}
 	m, _ := newTestManager(t, 4)
 	base := startUITestServer(t, m)
-	pages := []string{"/", "/?tab=settings", "/tray.html", "/video.html", "/confirm.html", "/progress.html", "/complete.html", "/error.html", "/drive.html", "/torrent.html"}
+	pages := []string{"/", "/?tab=settings", "/tray.html", "/video.html", "/confirm.html", "/progress.html", "/complete.html", "/error.html", "/drive.html", "/torrent.html", "/profile.html"}
 	set := func(theme string) {
 		s := m.Settings()
 		s.Theme = theme

@@ -18,6 +18,10 @@ const (
 	// sizes it to the content, between confirmFitMinWidth and confirmFitMaxWidth.
 	confirmWindowWidth  = 480
 	confirmWindowHeight = 400
+	// The profile media window (ui/profile.html) opens at this size and then
+	// fits itself to its content (fit.js).
+	profileWindowWidth  = 640
+	profileWindowHeight = 620
 	confirmFitMinWidth  = 440
 	confirmFitMaxWidth  = 520
 )
@@ -154,7 +158,7 @@ func isPopupAppURL(u string) bool {
 	}
 	for _, page := range []string{
 		"/video.html", "/confirm.html", "/progress.html", "/complete.html",
-		"/error.html", "/drive.html", "/torrent.html",
+		"/error.html", "/drive.html", "/torrent.html", "/profile.html",
 	} {
 		if p == page || strings.HasSuffix(p, page) {
 			return true
@@ -177,6 +181,7 @@ func isPopupWindowTitle(t string) bool {
 		"Download Google Drive folder",
 		"Download Google file",
 		"Add torrent",
+		"Download profile media",
 	} {
 		if t == n || strings.HasPrefix(t, n+" ") || strings.HasPrefix(t, n+" -") {
 			return true

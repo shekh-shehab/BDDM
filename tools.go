@@ -41,12 +41,16 @@ func toolSources() []toolSource {
 			}, inZip: []string{"ffmpeg.exe", "ffprobe.exe"}, size: 115 << 20},
 			{name: "deno", urls: []string{"https://github.com/denoland/deno/releases/latest/download/deno-x86_64-pc-windows-msvc.zip"},
 				inZip: []string{"deno.exe"}, size: 43 << 20},
+			// gallery-dl lists the photos, carousels and videos of profiles
+			// (profile.go).
+			{name: "gallery-dl", urls: []string{"https://github.com/mikf/gallery-dl/releases/latest/download/gallery-dl.exe"}, size: 14 << 20},
 		}
 	case "linux":
 		return []toolSource{
 			{name: "yt-dlp", urls: []string{"https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux"}, size: 35 << 20},
 			{name: "deno", urls: []string{"https://github.com/denoland/deno/releases/latest/download/deno-x86_64-unknown-linux-gnu.zip"},
 				inZip: []string{"deno"}, size: 45 << 20},
+			{name: "gallery-dl", urls: []string{"https://github.com/mikf/gallery-dl/releases/latest/download/gallery-dl.bin"}, size: 16 << 20},
 		}
 	}
 	return nil
@@ -103,7 +107,7 @@ func (t *Tools) Ready() bool {
 // Missing lists the tools that are not installed (deno is recommended).
 func (t *Tools) Missing() []string {
 	var out []string
-	for _, n := range []string{"yt-dlp", "ffmpeg", "deno"} {
+	for _, n := range []string{"yt-dlp", "ffmpeg", "deno", "gallery-dl"} {
 		if t.Find(n) == "" {
 			out = append(out, n)
 		}
@@ -126,7 +130,7 @@ type ToolsStatus struct {
 
 func (t *Tools) Status() ToolsStatus {
 	st := ToolsStatus{Ready: t.Ready(), Tools: map[string]bool{}, Paths: map[string]string{}, Missing: t.Missing()}
-	for _, n := range []string{"yt-dlp", "ffmpeg", "ffprobe", "deno"} {
+	for _, n := range []string{"yt-dlp", "ffmpeg", "ffprobe", "deno", "gallery-dl"} {
 		p := t.Find(n)
 		st.Tools[n] = p != ""
 		st.Paths[n] = p
@@ -158,6 +162,41 @@ func (t *Tools) OnReady(f func()) {
 	t.mu.Lock()
 	t.waiters = append(t.waiters, f)
 	t.mu.Unlock()
+}
+
+// Ensure returns the path of a tool, installing the missing tools first
+// when it is not there (waits up to wait). "" = not available.
+func (t *Tools) Ensure(ctx context.Context, name string, wait time.Duration) string {
+	if p := t.Find(name); p != "" {
+		return p
+	}
+	can := false
+	for _, s := range toolSources() {
+		if s.name == name {
+			can = true
+		}
+	}
+	if !can || t.Install() != nil {
+		return ""
+	}
+	deadline := time.Now().Add(wait)
+	for time.Now().Before(deadline) {
+		if p := t.Find(name); p != "" {
+			return p
+		}
+		t.mu.Lock()
+		busy := t.installing
+		t.mu.Unlock()
+		if !busy {
+			return t.Find(name)
+		}
+		select {
+		case <-ctx.Done():
+			return ""
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+	return ""
 }
 
 // Install downloads every missing tool (at the same time) in the background.

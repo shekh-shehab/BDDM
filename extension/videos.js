@@ -487,7 +487,68 @@ function createVideoMenu() {
     id: "bddm-video-page", title: "Download this video with BDDM", contexts: ["page", "video"],
     documentUrlPatterns: ["http://*/*", "https://*/*"],
   }, () => void api.runtime.lastError);
+  // Item 90: every photo and video of a profile or page.
+  api.contextMenus.create({
+    id: "bddm-page-media", title: "Download all media on this page with BDDM", contexts: ["page"],
+    documentUrlPatterns: ["http://*/*", "https://*/*"],
+  }, () => void api.runtime.lastError);
 }
+
+// Asks collect.js in the tab for the media it shows ({items, protected}).
+function collectPageMedia(tab) {
+  return new Promise((resolve) => {
+    if (!tab || tab.id == null) return resolve(null);
+    try {
+      api.tabs.sendMessage(tab.id, { type: "bddm-collect-media" }, { frameId: 0 }, (res) => {
+        void api.runtime.lastError;
+        resolve(res && Array.isArray(res.items) ? res : null);
+      });
+    } catch (e) { resolve(null); }
+  });
+}
+
+// Sends a page and the media found on it to BDDM, which lists them in its
+// "Download profile media" window. Uses this browser's own cookies, so
+// only what the user's account can see is listed.
+async function sendPageMedia(tab, pageUrl) {
+  const url = isWebUrl(pageUrl) ? pageUrl : (tab && isWebUrl(tab.url) ? tab.url : "");
+  if (!url) return { kind: "error", error: "Only http:// and https:// pages can be sent to BDDM." };
+  const found = (await collectPageMedia(tab)) || { items: [], protected: 0 };
+  await loadTabs();
+  const t = tab ? tabVideos.get(tab.id) : null;
+  for (const v of (t && t.list) || []) {
+    if (v.kind === "hls" || v.kind === "dash") found.items.push({ kind: "video", media: v.url, stream: v.kind, title: (tab && tab.title) || "" });
+    else if (v.kind === "file") found.items.push({ kind: "video", media: v.url, title: (tab && tab.title) || "" });
+  }
+  const storeId = tab && tab.cookieStoreId;
+  const req = {
+    url, referer: url, page: url, title: (tab && tab.title) || "",
+    cookie: await cookieHeader(url, { referer: url, storeId }),
+    items: found.items.slice(0, 1500), protected: found.protected || 0,
+  };
+  await withBrowserDetails(req, [url], { referer: url, storeId });
+  let r;
+  try {
+    r = await fetchTimeout(BDDM + "/ext/profile", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(req),
+    }, SEND_TIMEOUT);
+  } catch (e) {
+    return { kind: "offline" };
+  }
+  let data = {};
+  try { data = await r.json(); } catch (e) {}
+  if (r.status === 200 && data.ok) return { kind: "ok", message: data.message || "" };
+  if (r.status === 403 || r.status === 404 || r.status === 405) return { kind: "offline" };
+  return { kind: "error", error: data.error || ("BDDM answered " + r.status) };
+}
+
+api.contextMenus.onClicked.addListener(async (info, tab) => {
+  if (info.menuItemId !== "bddm-page-media") return;
+  const res = await sendPageMedia(tab, info.pageUrl || (tab && tab.url) || "");
+  if (res.kind === "ok") notify("Sent to BDDM", res.message || "Choose the photos and videos in the BDDM window.");
+  else if (res.kind === "offline") notify("BDDM is not running", "Start BDDM (1.5.10 or newer) first, then try again.");
+  else notify("BDDM could not list this page", res.error || "");
+});
 
 function detectedStream(tab) {
   if (!tab) return null;

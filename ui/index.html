@@ -1163,7 +1163,7 @@ async function loadTools() {
   clearTimeout(toolsTimer);
   let t;
   try { t = await api("/api/tools"); } catch (e) { return; }
-  const names = { "yt-dlp": "yt-dlp", ffmpeg: "ffmpeg", ffprobe: "ffprobe", deno: "deno (for YouTube)" };
+  const names = { "yt-dlp": "yt-dlp", ffmpeg: "ffmpeg", ffprobe: "ffprobe", deno: "deno (for YouTube)", "gallery-dl": "gallery-dl (photos and profiles)" };
   $("toolsList").innerHTML = "";
   for (const k of Object.keys(names)) {
     const d = el("div", "", (t.tools[k] ? "\u2714 " : "\u2716 ") + names[k] + (t.tools[k] ? "" : " - missing"));

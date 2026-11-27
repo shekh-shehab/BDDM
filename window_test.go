@@ -108,6 +108,7 @@ func TestIsPopupAppURL(t *testing.T) {
 		base + "/error.html?id=1",
 		base + "/drive.html?id=1",
 		base + "/torrent.html?id=1",
+		base + "/profile.html?id=1",
 		"/video.html",
 	} {
 		if !isPopupAppURL(u) {

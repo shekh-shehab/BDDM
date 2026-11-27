@@ -26,6 +26,7 @@ func TestWindowKindForURL(t *testing.T) {
 		base + "/error.html?id=1":    windowKindPopup,
 		base + "/drive.html?id=1":    windowKindPopup,
 		base + "/torrent.html?id=1":  windowKindPopup,
+		base + "/profile.html?id=1":  windowKindPopup,
 	}
 	for u, want := range cases {
 		if got := windowKindForURL(u); got != want {
@@ -46,6 +47,7 @@ func TestWindowTitleForURL(t *testing.T) {
 		base + "/error.html?id=1":    "Download failed",
 		base + "/drive.html?id=1":    "Download Google Drive folder",
 		base + "/torrent.html?id=1":  "Add torrent",
+		base + "/profile.html?id=1":  "Download profile media",
 	}
 	for u, want := range cases {
 		got := windowTitleForURL(u)

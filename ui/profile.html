@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Download profile media</title>
+<link rel="icon" type="image/png" sizes="32x32" href="icon-32.png">
+<link rel="icon" type="image/png" sizes="128x128" href="icon.png">
+<link rel="stylesheet" href="theme.css">
+<script src="scheme.js"></script>
+<style>
+  :root { --accent2: var(--text-accent); }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { background: var(--bg); color: var(--text); font: 14px/1.4 "Segoe UI", system-ui, -apple-system, sans-serif; display: flex; flex-direction: column; }
+  header { display: flex; align-items: center; gap: 10px; padding: 12px 18px; background: var(--panel); border-bottom: 1px solid var(--line); font-weight: 600; font-size: 15px; }
+  header img { width: 24px; height: 24px; flex: none; border-radius: 6px; display: block; }
+  header .who { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  header .site { margin-left: auto; flex: none; font-size: 12px; font-weight: 600; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 2px 9px; }
+  main { flex: 0 1 auto; min-height: 0; padding: 14px 18px 8px; overflow: auto; display: flex; flex-direction: column; }
+  .field { margin-bottom: 11px; min-width: 0; }
+  .field label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; margin-bottom: 5px; }
+  .line { display: flex; gap: 8px; }
+  input[type=text] { flex: 1; width: 100%; min-width: 0; font: inherit; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 14px; padding: 8px 11px; outline: none; }
+  input:focus, select:focus { border-color: var(--accent); }
+  select { font: inherit; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 14px; padding: 8px 11px; outline: none; width: 100%; }
+  .row2 { display: flex; gap: 10px; }
+  .row2 .field { flex: 1; }
+  .row2 .field.q { flex: 0 0 150px; }
+  button { font: inherit; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 14px; padding: 7px 13px; cursor: pointer; white-space: nowrap; }
+  button:hover { border-color: var(--hover-line); background: var(--hover-bg); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: var(--primary); border-color: transparent; color: var(--on-primary); font-weight: 600; border-radius: 999px; padding: 8px 16px; }
+  button.primary:hover { background: var(--accent2); }
+  .chip, .bar button { padding: 5px 11px; border-radius: 999px; font-size: 13px; }
+  .chip.on { border-color: var(--accent); color: var(--text-accent); }
+  .bar { display: flex; gap: 6px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+  .bar .sum { color: var(--muted); font-size: 13px; margin-left: auto; }
+  #gridBox { max-height: 316px; min-height: 120px; overflow: auto; margin-bottom: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(102px, 1fr)); gap: 8px; }
+  .tile { position: relative; border-radius: 8px; overflow: hidden; background: var(--panel2); border: 2px solid transparent; cursor: pointer; user-select: none; }
+  .tile.on { border-color: var(--accent); }
+  .tile.skip { opacity: .45; cursor: default; }
+  .tile .pic { aspect-ratio: 1 / 1; width: 100%; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 26px; background: var(--panel2); }
+  .tile .pic img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .tile input { position: absolute; top: 6px; left: 6px; width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
+  .tile .kind { position: absolute; right: 5px; top: 5px; font-size: 11px; font-weight: 600; color: #fff; background: rgba(0,0,0,.62); border-radius: 6px; padding: 1px 6px; }
+  .tile .nm { font-size: 12px; padding: 4px 6px 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+  .dim { color: var(--muted); font-size: 13px; padding: 6px; }
+  .note { color: var(--muted); font-size: 12.5px; margin: -2px 0 10px; }
+  .note:empty { display: none; }
+  .err { color: var(--text-danger, #fca5a5); font-size: 13px; }
+  .err:empty { display: none; }
+  .ok { color: var(--text-success, #86efac); font-size: 13px; }
+  label.chk { display: flex; gap: 6px; align-items: center; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  footer { display: flex; gap: 8px; align-items: center; padding: 12px 18px; background: var(--panel); border-top: 1px solid var(--line); }
+  footer .spacer { flex: 1; }
+</style>
+</head>
+<body data-fit-min="560" data-fit-max="680">
+<header>
+  <img src="icon-32.png" alt="" width="24" height="24">
+  <span class="who" id="title">Download profile media</span>
+  <span class="site" id="site" hidden></span>
+</header>
+<main>
+  <div class="bar">
+    <button class="chip on" data-show="all" id="showAll">All</button>
+    <button class="chip" data-show="video" id="showVideos">Videos</button>
+    <button class="chip" data-show="photo" id="showPhotos">Photos</button>
+    <button id="all">Select all</button>
+    <button id="none">Select none</button>
+    <span class="sum" id="sum">Listing...</span>
+  </div>
+  <div id="gridBox"><div class="grid" id="grid"></div><div class="dim" id="wait">Listing the photos and videos of this page... Large profiles can take a minute.</div></div>
+  <div class="note" id="note"></div>
+  <div class="row2">
+    <div class="field q">
+      <label for="quality">Video quality</label>
+      <select id="quality">
+        <option value="best">Best available</option>
+        <option value="1080">1080p</option>
+        <option value="720">720p</option>
+        <option value="480">480p</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="folder">Folder name</label>
+      <input id="folder" type="text" spellcheck="false" autocomplete="off">
+    </div>
+  </div>
+  <div class="field">
+    <label for="dir">Save to (the folder above is made inside)</label>
+    <div class="line">
+      <input id="dir" type="text" spellcheck="false" autocomplete="off">
+      <button id="browse">Change...</button>
+    </div>
+  </div>
+  <label class="chk"><input type="checkbox" id="again"> Also download items I downloaded before</label>
+  <div class="err" id="err"></div>
+</main>
+<footer>
+  <button id="later" title="Add them to the list paused" disabled>Download Later</button>
+  <span class="spacer"></span>
+  <button id="cancel">Cancel</button>
+  <button id="start" class="primary" disabled>Download</button>
+</footer>
+<script src="fit.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const id = new URLSearchParams(location.search).get("id") || "";
+let answered = false, dirTouched = false, folderTouched = false, show = "all", rendered = false;
+const tiles = []; // {el, cb, item}
+
+async function api(path, body) {
+  const opt = body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
+  const r = await fetch(path, opt);
+  let data = {};
+  try { data = await r.json(); } catch (e) {}
+  if (!r.ok || data.ok === false) throw new Error(data.error || ("HTTP " + r.status));
+  return data;
+}
+function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+function fmtDur(s) {
+  if (!s || s <= 0) return "";
+  s = Math.round(s);
+  const m = Math.floor(s / 60), x = s % 60;
+  return m + ":" + String(x).padStart(2, "0");
+}
+function placeholder(kind) { return kind === "photo" ? "\uD83D\uDDBC" : "\u25B6"; }
+
+function tile(item) {
+  const t = el("div", "tile" + (item.skip ? " skip" : ""));
+  const pic = el("div", "pic");
+  if (item.thumb) {
+    const img = document.createElement("img");
+    img.loading = "lazy";
+    img.referrerPolicy = "no-referrer";
+    img.alt = "";
+    img.src = item.thumb;
+    img.onerror = () => { pic.textContent = placeholder(item.kind); };
+    pic.append(img);
+  } else {
+    pic.textContent = placeholder(item.kind);
+  }
+  const cb = el("input"); cb.type = "checkbox";
+  cb.checked = !item.skip; cb.disabled = !!item.skip;
+  let kind = item.kind === "photo" ? "Photo" : item.kind === "post" ? "Post" : (fmtDur(item.duration) || "Video");
+  if (item.kind === "video" && item.duration) kind = "\u25B6 " + kind;
+  if (item.index > 0 && item.post) kind += " \u00b7 " + item.index;
+  const name = item.title || (item.kind === "photo" ? "Photo" : "Video");
+  const nm = el("div", "nm", name);
+  t.title = item.skip ? item.skip : name;
+  t.append(pic, cb, el("span", "kind", kind), nm);
+  const entry = { el: t, cb, item };
+  const sync = () => t.classList.toggle("on", cb.checked);
+  sync();
+  cb.onclick = (e) => { e.stopPropagation(); sync(); update(); };
+  t.onclick = () => { if (cb.disabled) return; cb.checked = !cb.checked; sync(); update(); };
+  entry.sync = sync;
+  return entry;
+}
+function visible(e) { return show === "all" || (show === "video" ? e.item.kind !== "photo" : e.item.kind === "photo"); }
+function applyShow() {
+  for (const e of tiles) e.el.hidden = !visible(e);
+  for (const b of document.querySelectorAll(".chip")) b.classList.toggle("on", b.dataset.show === show);
+}
+function update() {
+  let n = 0, v = 0, p = 0;
+  for (const e of tiles) if (e.cb.checked && !e.cb.disabled) { n++; if (e.item.kind === "photo") p++; else v++; }
+  const parts = [];
+  if (v) parts.push(v + (v === 1 ? " video" : " videos"));
+  if (p) parts.push(p + (p === 1 ? " photo" : " photos"));
+  $("sum").textContent = n + " of " + tiles.length + " selected" + (parts.length ? " (" + parts.join(", ") + ")" : "");
+  $("start").disabled = $("later").disabled = n === 0 || answered;
+  $("start").textContent = n ? "Download " + n : "Download";
+}
+function render(v) {
+  rendered = true;
+  $("grid").textContent = "";
+  tiles.length = 0;
+  for (const item of v.items || []) {
+    const e = tile(item);
+    tiles.push(e);
+    $("grid").append(e.el);
+  }
+  $("showAll").textContent = "All (" + tiles.length + ")";
+  $("showVideos").textContent = "Videos (" + (v.videos || 0) + ")";
+  $("showPhotos").textContent = "Photos (" + (v.photos || 0) + ")";
+  $("showVideos").hidden = !v.videos || !v.photos;
+  $("showPhotos").hidden = !v.videos || !v.photos;
+  $("wait").hidden = true;
+  applyShow();
+  update();
+}
+async function load() {
+  let v;
+  try { v = await api("/api/profile/" + encodeURIComponent(id)); }
+  catch (e) { gone(e.message); return; }
+  if (!dirTouched) $("dir").value = v.dir || "";
+  if (!folderTouched) $("folder").value = v.folder || "";
+  const who = v.name ? v.name : "Profile";
+  $("title").textContent = "Download profile media: " + who;
+  document.title = "Download profile media - " + who;
+  if (v.site) { $("site").textContent = v.site; $("site").hidden = false; }
+  $("note").textContent = v.note || "";
+  if (v.state === "loading") {
+    $("sum").textContent = "Listing...";
+    if (window.bddmFitWindow) bddmFitWindow();
+    setTimeout(load, 900);
+    return;
+  }
+  if (v.state === "error") {
+    $("wait").hidden = true;
+    $("grid").textContent = "";
+    $("sum").textContent = "";
+    $("err").textContent = v.error || "BDDM could not list this page.";
+    for (const b of ["start", "later", "all", "none"]) $(b).disabled = true;
+    if (window.bddmFitWindow) bddmFitWindow();
+    return;
+  }
+  render(v);
+  if (window.bddmFitWindow) bddmFitWindow();
+}
+function gone(msg) {
+  answered = true;
+  $("err").textContent = msg;
+  for (const b of ["start", "later", "browse", "all", "none"]) $(b).disabled = true;
+  $("cancel").textContent = "Close";
+  if (window.bddmFitWindow) bddmFitWindow();
+}
+async function start(later) {
+  const ids = tiles.filter((e) => e.cb.checked && !e.cb.disabled).map((e) => e.item.id);
+  $("err").textContent = "";
+  for (const b of ["start", "later"]) $(b).disabled = true;
+  try {
+    const r = await api("/api/profile/" + encodeURIComponent(id) + "/start", {
+      ids, dir: $("dir").value, folder: $("folder").value, quality: $("quality").value, later, again: $("again").checked,
+    });
+    const res = r.result || {};
+    let msg = res.added + " item(s) added to BDDM" + (later ? " (paused)" : "") + ", saved in " + res.folder + ".";
+    if (res.skipped && res.skipped.length) msg += " " + res.skipped.length + " item(s) were downloaded before and skipped (tick \"Also download items I downloaded before\" to get them again).";
+    gone("");
+    const ok = el("div", "ok", msg);
+    $("err").replaceWith(ok);
+    if (window.bddmFitWindow) bddmFitWindow();
+    if (!res.skipped || !res.skipped.length) setTimeout(() => window.close(), 1500);
+  } catch (e) {
+    $("err").textContent = e.message;
+    update();
+  }
+}
+async function cancel() {
+  if (!answered) {
+    answered = true;
+    try { await api("/api/profile/" + encodeURIComponent(id) + "/cancel", {}); } catch (e) {}
+  }
+  window.close();
+  setTimeout(() => gone("Closed. You can close this window."), 300);
+}
+for (const b of document.querySelectorAll(".chip")) b.onclick = () => { show = b.dataset.show; applyShow(); };
+$("all").onclick = () => { for (const e of tiles) if (!e.cb.disabled && visible(e)) { e.cb.checked = true; e.sync(); } update(); };
+$("none").onclick = () => { for (const e of tiles) if (visible(e)) { e.cb.checked = false; e.sync(); } update(); };
+$("dir").oninput = () => { dirTouched = true; };
+$("folder").oninput = () => { folderTouched = true; };
+$("start").onclick = () => start(false);
+$("later").onclick = () => start(true);
+$("cancel").onclick = cancel;
+$("browse").onclick = async () => {
+  $("browse").disabled = true;
+  try {
+    const r = await api("/api/pickfolder", { start: $("dir").value });
+    if (r.dir) { $("dir").value = r.dir; dirTouched = true; }
+  } catch (e) { $("err").textContent = "Folder picker: " + e.message; }
+  $("browse").disabled = false;
+};
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.preventDefault(); cancel(); } });
+const scheme = new URLSearchParams(location.search).get("scheme");
+if (scheme === "dark" || scheme === "light") document.documentElement.dataset.scheme = scheme;
+load();
+</script>
+</body>
+</html>

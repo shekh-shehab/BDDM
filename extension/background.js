@@ -917,7 +917,7 @@ async function sendLinkFromMenu(url, referer, tab) {
 }
 
 api.contextMenus.onClicked.addListener(async (info, tab) => {
-  if (info.menuItemId === "bddm-video-page") return; // handled in videos.js
+  if (info.menuItemId === "bddm-video-page" || info.menuItemId === "bddm-page-media") return; // handled in videos.js
   let urls;
   if (info.menuItemId === "bddm-drive-page") {
     const t = await driveMenuTargets(info, tab);

@@ -56,6 +56,17 @@
       ],
       "all_frames": true,
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "compat.js",
+        "collect.js"
+      ],
+      "run_at": "document_idle"
     }
   ]
 }

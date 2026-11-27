@@ -752,7 +752,7 @@ func TestExtensionPopupRenders(t *testing.T) {
 }
 
 func TestPopupPagesReportFit(t *testing.T) {
-	pages := []string{"video.html", "confirm.html", "progress.html", "complete.html", "error.html", "drive.html", "torrent.html"}
+	pages := []string{"video.html", "confirm.html", "progress.html", "complete.html", "error.html", "drive.html", "torrent.html", "profile.html"}
 	for _, name := range pages {
 		page := readUI(t, name)
 		if !strings.Contains(page, `src="fit.js"`) {
@@ -929,7 +929,7 @@ func TestOtherPopupsFitHeight(t *testing.T) {
 		page string
 		w, h int
 	}{
-		{"confirm.html?id=x", 600, 520}, {"drive.html?id=x", 600, 560}, {"torrent.html?id=x", 560, 620},
+		{"confirm.html?id=x", 600, 520}, {"drive.html?id=x", 600, 560}, {"torrent.html?id=x", 560, 620}, {"profile.html?id=x", 640, 620},
 		{"progress.html?id=x", 500, 400}, {"complete.html?id=x", 500, 240}, {"error.html?id=x", 500, 360},
 	} {
 		_, h1 := chromeFit(t, chrome, base+"/"+c.page, c.w, c.h)

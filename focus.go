@@ -19,6 +19,7 @@ var bddmWindowTitles = []string{
 	"Download progress",
 	"Download complete",
 	"Download failed",
+	"Download profile media",
 }
 
 // isBDDMUITitle reports whether title belongs to a BDDM app window.

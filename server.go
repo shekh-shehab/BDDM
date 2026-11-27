@@ -305,6 +305,41 @@ func newServer(m *Manager, port string, quit func(), upd *Updater) http.Handler 
 		}
 		writeJSON(w, 200, map[string]any{"ok": true, "result": res})
 	})
+	// Profile and page media (profile.go, ui/profile.html).
+	mux.HandleFunc("GET /api/profile/{id}", func(w http.ResponseWriter, r *http.Request) {
+		v, err := m.Profile(r.PathValue("id"))
+		if err != nil {
+			writeJSON(w, 404, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+		writeJSON(w, 200, v)
+	})
+	mux.HandleFunc("POST /api/profile/{id}/start", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			IDs     []string `json:"ids"`
+			Dir     string   `json:"dir"`
+			Folder  string   `json:"folder"`
+			Quality string   `json:"quality"`
+			Later   bool     `json:"later"`
+			Again   bool     `json:"again"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<20)).Decode(&body); err != nil {
+			writeJSON(w, 400, map[string]any{"ok": false, "error": "Bad request"})
+			return
+		}
+		res, err := m.StartProfile(r.PathValue("id"), body.IDs, body.Dir, body.Folder, body.Quality, body.Later, body.Again)
+		if err != nil {
+			writeJSON(w, 400, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+		writeJSON(w, 200, map[string]any{"ok": true, "result": res})
+	})
+	mux.HandleFunc("POST /api/profile/{id}/cancel", func(w http.ResponseWriter, r *http.Request) {
+		m.CancelProfile(r.PathValue("id"))
+		writeJSON(w, 200, map[string]any{"ok": true})
+	})
+	// The extension's "Download all media on this page with BDDM".
+	mux.HandleFunc("POST /ext/profile", s.handleExtProfile)
 	mux.HandleFunc("POST /api/drive/{id}/cancel", func(w http.ResponseWriter, r *http.Request) {
 		m.CancelDriveFolder(r.PathValue("id"))
 		reply(w, nil)
@@ -598,6 +633,10 @@ func (s *server) handlePasted(w http.ResponseWriter, r *http.Request) {
 	if s.handleDrive(w, req, false) {
 		return
 	}
+	if isProfileRequest(req) {
+		s.addProfile(w, req, nil, 0)
+		return
+	}
 	if oneShotPage(req.URL) {
 		writeJSON(w, 400, map[string]any{"ok": false, "error": msgOneShotPage})
 		return
@@ -633,6 +672,10 @@ func (s *server) handleCaptured(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Kind != "video" && s.handleDrive(w, req, true) {
+		return
+	}
+	if isProfileRequest(req) {
+		s.addProfile(w, req, nil, 0)
 		return
 	}
 	if isVideoRequest(req) {
@@ -673,6 +716,45 @@ func captureName(req AddRequest) string {
 		return n
 	}
 	return filenameFromURL(req.URL)
+}
+
+// isProfileRequest: a profile/creator page link (TikTok, Instagram, RedGIFs,
+// Fansly, X, a YouTube channel) that lists many photos and videos.
+func isProfileRequest(req AddRequest) bool {
+	if req.Dialog || req.Kind == "media" || req.Stream != "" {
+		return false
+	}
+	_, _, ok := profileSite(req.URL)
+	return ok
+}
+
+// addProfile opens the profile window for a link (items: what the
+// extension found on the page, or nil).
+func (s *server) addProfile(w http.ResponseWriter, req AddRequest, items []MediaItem, protected int) {
+	id, err := s.m.AddProfile(req, items, protected)
+	if err != nil {
+		writeJSON(w, 400, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	u := "http://127.0.0.1:" + s.port + "/profile.html?id=" + id
+	if err := openAppWindowSize(u, profileWindowWidth, profileWindowHeight); err != nil {
+		log.Printf("could not open the profile window: %v (open %s)", err, u)
+	}
+	writeJSON(w, 200, map[string]any{"ok": true, "pending": true, "profile": true, "window": u,
+		"message": "Choose the photos and videos in the BDDM window."})
+}
+
+// handleExtProfile: the extension sends a page and the media found on it.
+func (s *server) handleExtProfile(w http.ResponseWriter, r *http.Request) {
+	var req ProfileRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<20)).Decode(&req); err != nil {
+		writeJSON(w, 400, map[string]any{"ok": false, "error": "Bad request: expected JSON {url, items}"})
+		return
+	}
+	if req.Protected < 0 {
+		req.Protected = 0
+	}
+	s.addProfile(w, req.AddRequest, req.Items, req.Protected)
 }
 
 // handleDrive handles Google Drive links: folders open the folder window,
