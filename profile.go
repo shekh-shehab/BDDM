@@ -52,6 +52,10 @@ type MediaItem struct {
 	Post     string  `json:"post,omitempty"`  // post key ("ig:Cx1", "tt:123"); carousel images share it
 	Index    int     `json:"index,omitempty"` // place in a carousel (1, 2, ...)
 	Skip     string  `json:"skip,omitempty"`  // why it can't be downloaded
+	// Cookie: cookies the site's CDN needs for this one file (Fansly's
+	// signed video playlists). Only from the extension; never shown to
+	// the window (Profile clears it).
+	Cookie string `json:"cookie,omitempty"`
 }
 
 // ProfileRequest is what the browser extension sends for "Download all
@@ -60,7 +64,15 @@ type MediaItem struct {
 type ProfileRequest struct {
 	AddRequest
 	Items     []MediaItem `json:"items"`
-	Protected int         `json:"protected,omitempty"` // DRM or stream-only players on the page
+	Protected int         `json:"protected,omitempty"` // DRM, locked or stream-only media on the page
+	// Name: the profile's user name as the page shows it (the extension
+	// reads it from the site, e.g. Fansly's account), for the folder name.
+	Name string `json:"name,omitempty"`
+	// Complete: the extension listed the whole profile through the site's
+	// own API with the user's session (not only what is scrolled into view).
+	Complete bool `json:"complete,omitempty"`
+	// Limited: the extension stopped at its limit (the newest posts only).
+	Limited bool `json:"limited,omitempty"`
 }
 
 type profileList struct {
@@ -73,6 +85,7 @@ type profileList struct {
 	note      string
 	items     []MediaItem
 	fromPage  int
+	complete  bool // the page's list is the whole profile (site API)
 	protected int
 	dir       string
 	folder    string
@@ -111,7 +124,7 @@ var (
 	tiktokUserRe    = regexp.MustCompile(`^/@([\w.\-]+)/?$`)
 	instagramUserRe = regexp.MustCompile(`^/([A-Za-z0-9._]{1,30})(?:/(?:posts|reels|tagged|photos))?/?$`)
 	redgifsUserRe   = regexp.MustCompile(`^/users/([^/?#]+)(?:/(?:collections(?:/[^/?#]+)?|gifs|images))?/?$`)
-	fanslyUserRe    = regexp.MustCompile(`^/([A-Za-z0-9_.\-]{2,40})(?:/(?:posts|media))?/?$`)
+	fanslyUserRe    = regexp.MustCompile(`^/([A-Za-z0-9_.\-]{2,40})(?:/(?:posts|media)(?:/wall/\d+)?)?/?$`)
 	xUserRe         = regexp.MustCompile(`^/([A-Za-z0-9_]{1,15})(?:/(?:media|photos|videos))?/?$`)
 	youtubeUserRe   = regexp.MustCompile(`^/(?:@[\w.\-]+|channel/[\w-]+|c/[^/]+|user/[^/]+)(?:/(?:videos|shorts|streams|featured))?/?$`)
 )
@@ -182,14 +195,48 @@ func genericPageSite(raw string) (site, name string) {
 		return "Web page", "Page"
 	}
 	h := siteHost(u.Hostname())
-	n := strings.Trim(u.Path, "/")
-	if i := strings.LastIndex(n, "/"); i >= 0 {
-		n = n[i+1:]
+	// The last part of the path that is a name: not a number (a wall,
+	// page or account id) and not a tab such as "posts" or "media".
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	n := ""
+	for i := len(parts) - 1; i >= 0; i-- {
+		s, _ := url.PathUnescape(parts[i])
+		if s == "" || numericName(s) || genericPathWords[strings.ToLower(s)] {
+			continue
+		}
+		n = s
+		break
 	}
 	if n == "" {
 		n = h
 	}
 	return h, n
+}
+
+var genericPathWords = setOf("posts", "post", "media", "wall", "walls", "photos", "videos", "gallery", "page",
+	"p", "user", "users", "u", "profile", "creator", "index.html", "home", "feed", "tab", "all")
+
+// numericName: an id rather than a name ("785496081252233221").
+func numericName(s string) bool {
+	s = strings.TrimPrefix(strings.TrimSpace(s), "@")
+	if len(s) < 6 {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// cleanProfileName checks a user name sent by the page.
+func cleanProfileName(s string) string {
+	s = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(s), "@"))
+	if s == "" || len(s) > 60 || numericName(s) || strings.ContainsAny(s, "/\\<>:\"|?*\r\n\t") {
+		return ""
+	}
+	return s
 }
 
 // postKey turns a post/video page into a key that the same post gets from
@@ -238,7 +285,11 @@ func postKey(raw string) string {
 
 // AddProfile starts listing a profile or page for the profile window.
 // pageItems are the media the extension found on the open page (or nil).
-func (m *Manager) AddProfile(r AddRequest, pageItems []MediaItem, protected int) (string, error) {
+func (m *Manager) AddProfile(pr ProfileRequest) (string, error) {
+	r, pageItems, protected := pr.AddRequest, pr.Items, pr.Protected
+	if protected < 0 {
+		protected = 0
+	}
 	r.URL = strings.TrimSpace(r.URL)
 	u, err := url.Parse(r.URL)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
@@ -247,6 +298,14 @@ func (m *Manager) AddProfile(r AddRequest, pageItems []MediaItem, protected int)
 	site, name, known := profileSite(r.URL)
 	if !known {
 		site, name = genericPageSite(r.URL)
+	}
+	if pn := cleanProfileName(pr.Name); pn != "" && (!known || site == "Fansly" || numericName(name)) {
+		// The page knows the real user name (e.g. a Fansly page whose
+		// address has the account's number).
+		if strings.HasPrefix(name, "@") && !strings.HasPrefix(pn, "@") {
+			pn = "@" + pn
+		}
+		name = pn
 	}
 	items := cleanPageItems(pageItems, r.URL)
 	m.mu.Lock()
@@ -259,7 +318,7 @@ func (m *Manager) AddProfile(r AddRequest, pageItems []MediaItem, protected int)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), profileListTimeout+time.Minute)
 	p := &profileList{id: newID(), req: r, site: site, name: name, state: "loading", items: items,
-		fromPage: len(items), protected: protected, dir: m.settings.dirForCategory("Video"),
+		fromPage: len(items), complete: pr.Complete && len(items) > 0, limited: pr.Limited, protected: protected, dir: m.settings.dirForCategory("Video"),
 		folder: profileFolderName(site, name), cancel: cancel}
 	m.profiles[p.id] = p
 	m.mu.Unlock()
@@ -292,6 +351,9 @@ func (m *Manager) Profile(id string) (ProfileView, error) {
 	v := ProfileView{ID: p.id, URL: p.req.URL, Site: p.site, Name: p.name, State: p.state, Error: p.err,
 		Note: p.note, Items: append([]MediaItem{}, p.items...), Protected: p.protected, Dir: p.dir,
 		Folder: p.folder, Limited: p.limited}
+	for i := range v.Items {
+		v.Items[i].Cookie = ""
+	}
 	for _, it := range p.items {
 		switch it.Kind {
 		case "photo":
@@ -342,7 +404,7 @@ func (m *Manager) listProfile(ctx context.Context, p *profileList, known bool) {
 		return
 	}
 	p.items = mergeMedia(p.items, toolItems)
-	p.limited = limited
+	p.limited = p.limited || limited
 	if len(p.items) > profileMaxItems {
 		p.items = p.items[:profileMaxItems]
 		p.limited = true
@@ -360,12 +422,14 @@ func (m *Manager) listProfile(ctx context.Context, p *profileList, known bool) {
 		p.state = "ready"
 		if toolErr != nil && pageCount > 0 {
 			p.note = fmt.Sprintf("Showing the %d item(s) that were loaded on the page. Scroll further down on the page and send it to BDDM again to add more.", len(p.items))
+		} else if p.complete {
+			// The extension listed the whole profile with the site's API.
 		} else if site == "Fansly" || (!useTools && pageCount > 0) {
 			p.note = "Showing what is loaded on the page. Scroll further down on the page and send it to BDDM again to add more."
 		}
 	}
 	if p.protected > 0 {
-		extra := fmt.Sprintf("%d item(s) on the page are protected (DRM) or only streamed, so BDDM can't save them.", p.protected)
+		extra := fmt.Sprintf("%d item(s) are locked, paid or protected (DRM) for your account, so BDDM can't save them.", p.protected)
 		p.note = strings.TrimSpace(p.note + " " + extra)
 	}
 	if p.limited {
@@ -797,6 +861,12 @@ func cleanPageItems(in []MediaItem, pageURL string) []MediaItem {
 		it.Page = webLink(it.Page)
 		it.Stream = streamKind(it.Stream)
 		it.Skip, it.ID = "", ""
+		if len(it.Cookie) > 8<<10 || strings.ContainsAny(it.Cookie, "\r\n") {
+			it.Cookie = ""
+		}
+		if it.Kind == "photo" && siteChromeImage(it.Media, pageURL) {
+			continue // a logo, icon or other part of the site, not media
+		}
 		switch it.Kind {
 		case "photo", "video":
 		case "post":
@@ -838,6 +908,32 @@ func cleanPageItems(in []MediaItem, pageURL string) []MediaItem {
 		}
 	}
 	return out
+}
+
+var chromeImageRe = regexp.MustCompile(`(?i)(^|[/_.\-])(logo|logos|favicon|sprite|sprites|icon|icons|emoji|emojis|badge|badges|placeholder|spinner|loader)([/_.\-]|$)`)
+
+// siteChromeImage: an image that is part of the site itself (a logo, an
+// icon, an SVG, a Fansly site asset), not a photo of the profile.
+func siteChromeImage(media, pageURL string) bool {
+	u, err := url.Parse(media)
+	if err != nil {
+		return true
+	}
+	ext := strings.ToLower(path.Ext(u.Path))
+	if ext == ".svg" || ext == ".ico" {
+		return true
+	}
+	if chromeImageRe.MatchString(u.Path) {
+		return true
+	}
+	// Fansly's own pictures (the wordmark, the heart-lock logo) come from
+	// fansly.com itself; post media comes from its CDN (cdn3.fansly.com).
+	if pu, err := url.Parse(pageURL); err == nil && siteHost(pu.Hostname()) == "fansly.com" {
+		if h := strings.ToLower(u.Hostname()); h == "fansly.com" || h == "www.fansly.com" {
+			return true
+		}
+	}
+	return false
 }
 
 func webLink(raw string) string {
@@ -896,7 +992,7 @@ func mergeMedia(a, b []MediaItem) []MediaItem {
 				o.Page = it.Page
 			}
 			if o.Media == "" {
-				o.Media, o.Stream, o.Ext = it.Media, it.Stream, it.Ext
+				o.Media, o.Stream, o.Ext, o.Cookie = it.Media, it.Stream, it.Ext, it.Cookie
 			}
 			if o.Duration == 0 {
 				o.Duration = it.Duration
@@ -1018,6 +1114,10 @@ func profileJob(it MediaItem, p *profileList, dir, quality string, n int, names 
 	j := &Job{ID: newID(), Dir: dir, Parts: parts, Started: time.Now(), Referer: p.req.URL, Cookie: strings.TrimSpace(p.req.Cookie)}
 	j.applyBrowser(p.req)
 	j.Referer = p.req.URL
+	if c := strings.TrimSpace(it.Cookie); c != "" && it.Media != "" {
+		// The CDN's own cookies for this file (signed video playlists).
+		j.Cookie = c
+	}
 	// Post links and videos known only by their page go to yt-dlp, and so
 	// do TikTok videos (their files need the app's own tokens).
 	viaPage := it.Page != "" && (it.Kind == "post" ||

@@ -494,16 +494,21 @@ function createVideoMenu() {
   }, () => void api.runtime.lastError);
 }
 
-// Asks collect.js in the tab for the media it shows ({items, protected}).
+// Asks collect.js in the tab for the media it shows ({items, protected,
+// name, complete, limited}). Fansly profiles are listed through the site's
+// API, which can take a minute for big profiles.
+const COLLECT_TIMEOUT = 150000;
 function collectPageMedia(tab) {
   return new Promise((resolve) => {
     if (!tab || tab.id == null) return resolve(null);
+    const timer = setTimeout(() => resolve(null), COLLECT_TIMEOUT);
     try {
       api.tabs.sendMessage(tab.id, { type: "bddm-collect-media" }, { frameId: 0 }, (res) => {
         void api.runtime.lastError;
+        clearTimeout(timer);
         resolve(res && Array.isArray(res.items) ? res : null);
       });
-    } catch (e) { resolve(null); }
+    } catch (e) { clearTimeout(timer); resolve(null); }
   });
 }
 
@@ -515,7 +520,9 @@ async function sendPageMedia(tab, pageUrl) {
   if (!url) return { kind: "error", error: "Only http:// and https:// pages can be sent to BDDM." };
   const found = (await collectPageMedia(tab)) || { items: [], protected: 0 };
   await loadTabs();
-  const t = tab ? tabVideos.get(tab.id) : null;
+  // The site's API listed every post: the player streams of the tab are
+  // already among them (and have no title or picture).
+  const t = tab && !found.api ? tabVideos.get(tab.id) : null;
   for (const v of (t && t.list) || []) {
     if (v.kind === "hls" || v.kind === "dash") found.items.push({ kind: "video", media: v.url, stream: v.kind, title: (tab && tab.title) || "" });
     else if (v.kind === "file") found.items.push({ kind: "video", media: v.url, title: (tab && tab.title) || "" });
@@ -526,12 +533,15 @@ async function sendPageMedia(tab, pageUrl) {
     cookie: await cookieHeader(url, { referer: url, storeId }),
     items: found.items.slice(0, 1500), protected: found.protected || 0,
   };
+  if (found.name) req.name = String(found.name).slice(0, 60);
+  if (found.complete) req.complete = true;
+  if (found.limited) req.limited = true;
   await withBrowserDetails(req, [url], { referer: url, storeId });
   let r;
   try {
     r = await fetchTimeout(BDDM + "/ext/profile", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(req),
-    }, SEND_TIMEOUT);
+    }, Math.max(SEND_TIMEOUT, 10000));
   } catch (e) {
     return { kind: "offline" };
   }

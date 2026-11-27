@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"html"
+	"image"
+	"image/png"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -308,7 +311,7 @@ func TestProfileListAndDownload(t *testing.T) {
 		`[3, "%[1]s/a2.jpg", {"post_shortcode": "Cabc", "num": 2, "extension": "jpg", "description": "Beach"}]]`, srv.URL)
 	writeFakeTool(t, m, "gallery-dl", fmt.Sprintf("for a in \"$@\"; do echo \"$a\" >> %q; done\ncat <<'EOF'\n%s\nEOF\n", argsFile, out))
 
-	id, err := m.AddProfile(AddRequest{URL: "https://www.instagram.com/natgeo/", Cookie: "sessionid=abc"}, nil, 0)
+	id, err := m.AddProfile(ProfileRequest{AddRequest: AddRequest{URL: "https://www.instagram.com/natgeo/", Cookie: "sessionid=abc"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -343,7 +346,7 @@ func TestProfileListAndDownload(t *testing.T) {
 	}
 
 	// The same profile again: both photos were downloaded before.
-	id, _ = m.AddProfile(AddRequest{URL: "https://www.instagram.com/natgeo/"}, nil, 0)
+	id, _ = m.AddProfile(ProfileRequest{AddRequest: AddRequest{URL: "https://www.instagram.com/natgeo/"}})
 	v = waitProfile(t, m, id)
 	deadline := time.Now().Add(10 * time.Second)
 	for {
@@ -354,7 +357,7 @@ func TestProfileListAndDownload(t *testing.T) {
 		if len(res.Skipped) == 2 || time.Now().After(deadline) {
 			break
 		}
-		id, _ = m.AddProfile(AddRequest{URL: "https://www.instagram.com/natgeo/"}, nil, 0)
+		id, _ = m.AddProfile(ProfileRequest{AddRequest: AddRequest{URL: "https://www.instagram.com/natgeo/"}})
 		v = waitProfile(t, m, id)
 		time.Sleep(100 * time.Millisecond)
 	}
@@ -371,7 +374,7 @@ func TestProfileFanslyFromPage(t *testing.T) {
 		{Kind: "photo", Media: "https://cdn3.fansly.com/a.jpg", Title: "One"},
 		{Kind: "video", Media: "https://cdn3.fansly.com/b.mp4", Thumb: "https://cdn3.fansly.com/b.jpg"},
 	}
-	id, err := m.AddProfile(AddRequest{URL: "https://fansly.com/somecreator/posts"}, items, 1)
+	id, err := m.AddProfile(ProfileRequest{AddRequest: AddRequest{URL: "https://fansly.com/somecreator/posts"}, Items: items, Protected: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -382,7 +385,7 @@ func TestProfileFanslyFromPage(t *testing.T) {
 	if !strings.Contains(v.Note, "Scroll further") || !strings.Contains(v.Note, "protected (DRM)") {
 		t.Errorf("note: %q", v.Note)
 	}
-	id, _ = m.AddProfile(AddRequest{URL: "https://fansly.com/somecreator"}, nil, 0)
+	id, _ = m.AddProfile(ProfileRequest{AddRequest: AddRequest{URL: "https://fansly.com/somecreator"}})
 	v = waitProfile(t, m, id)
 	if v.State != "error" || v.Error != fanslyHelp {
 		t.Errorf("no page items: %+v", v)
@@ -506,5 +509,180 @@ func TestCollectScript(t *testing.T) {
 	b, _ = os.ReadFile(filepath.Join("extension", "videos.js"))
 	if !strings.Contains(string(b), "Download all media on this page with BDDM") || !strings.Contains(string(b), "/ext/profile") {
 		t.Error("videos.js: the page media menu is missing")
+	}
+}
+
+// Bug 92: a Fansly wall address and pages whose address has the account's
+// number got a numeric folder name; the page's user name is used instead.
+func TestProfileFanslyNames(t *testing.T) {
+	site, name, ok := profileSite("https://fansly.com/somecreator/posts/wall/785496081252233221")
+	if !ok || site != "Fansly" || name != "somecreator" {
+		t.Errorf("wall address: %q %q %v", site, name, ok)
+	}
+	if _, n := genericPageSite("https://example.com/gallery/summer/785496081252233221"); n != "summer" {
+		t.Errorf("generic name skips numbers: %q", n)
+	}
+	if _, n := genericPageSite("https://example.com/someone/posts"); n != "someone" {
+		t.Errorf("generic name skips tabs: %q", n)
+	}
+	m, _ := newTestManager(t, 1)
+	items := []MediaItem{{Kind: "photo", Media: "https://cdn3.fansly.com/1/2.jpeg"}}
+	for _, c := range []struct{ url, name, folder string }{
+		{"https://fansly.com/785496081252233221/posts", "realname", "realname (Fansly)"},
+		{"https://fansly.com/somecreator/posts/wall/785496081252233221", "", "somecreator (Fansly)"},
+		{"https://fansly.com/somecreator/posts", "SomeCreator", "SomeCreator (Fansly)"},
+		{"https://fansly.com/785496081252233221/posts", "785496081252233221", "785496081252233221 (Fansly)"}, // no real name known: the id keeps profiles apart
+		{"https://fansly.com/somecreator", "../../evil", "somecreator (Fansly)"},
+		{"https://www.instagram.com/natgeo/", "other", "natgeo (Instagram)"}, // a known name wins
+	} {
+		id, err := m.AddProfile(ProfileRequest{AddRequest: AddRequest{URL: c.url}, Items: items, Name: c.name})
+		if err != nil {
+			t.Fatal(err)
+		}
+		m.mu.Lock()
+		got := m.profiles[id].folder
+		m.mu.Unlock()
+		m.CancelProfile(id)
+		if got != c.folder {
+			t.Errorf("%s with name %q: folder %q, want %q", c.url, c.name, got, c.folder)
+		}
+	}
+}
+
+// Bug 92: Fansly's logos and other site pictures are not listed; a list the
+// extension made with the site's API has no "scroll further" note; the
+// CDN cookies of a signed video stay out of the window but reach the job.
+func TestProfileFanslyAPIList(t *testing.T) {
+	m, _ := newTestManager(t, 1)
+	items := []MediaItem{
+		{Kind: "photo", Media: "https://fansly.com/assets/images/fansly-wordmark.png"},
+		{Kind: "photo", Media: "https://fansly.com/assets/images/heart-lock.png"},
+		{Kind: "photo", Media: "https://fansly.com/assets/images/logo/fansly_light.svg"},
+		{Kind: "photo", Media: "https://cdn3.fansly.com/785/111.jpeg?Signature=x", Page: "https://fansly.com/post/100", Post: "fs:100", Index: 1, Title: "Beach"},
+		{Kind: "video", Media: "https://cdn3.fansly.com/v/master.m3u8", Stream: "hls", Page: "https://fansly.com/post/103", Post: "fs:103", Index: 1,
+			Cookie: "CloudFront-Key-Pair-Id=K; CloudFront-Signature=S; CloudFront-Policy=P"},
+	}
+	id, err := m.AddProfile(ProfileRequest{AddRequest: AddRequest{URL: "https://fansly.com/somecreator/posts", Cookie: "f=1"},
+		Items: items, Protected: 2, Name: "somecreator", Complete: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := waitProfile(t, m, id)
+	if v.State != "ready" || len(v.Items) != 2 || v.Photos != 1 || v.Videos != 1 {
+		t.Fatalf("view: %+v", v)
+	}
+	if strings.Contains(v.Note, "Scroll further") || !strings.Contains(v.Note, "2 item(s) are locked, paid or protected") {
+		t.Errorf("note: %q", v.Note)
+	}
+	b, _ := json.Marshal(v)
+	if strings.Contains(string(b), "CloudFront") {
+		t.Error("the CDN cookies must not be shown to the window")
+	}
+	m.mu.Lock()
+	p := m.profiles[id]
+	var vid MediaItem
+	for _, it := range p.items {
+		if it.Kind == "video" {
+			vid = it
+		}
+	}
+	m.mu.Unlock()
+	j := profileJob(vid, p, "/d", "best", 1, map[string]bool{}, 4)
+	if j.Kind != "video" || j.Stream != "hls" || j.URL != "https://cdn3.fansly.com/v/master.m3u8" || !strings.Contains(j.Cookie, "CloudFront-Policy=P") {
+		t.Errorf("signed video job: %+v", j)
+	}
+	if siteChromeImage("https://cdn3.fansly.com/785/111.jpeg", "https://fansly.com/x/posts") {
+		t.Error("a Fansly CDN photo is media")
+	}
+	if !siteChromeImage("https://example.com/static/icons/like.png", "https://example.com/") || siteChromeImage("https://example.com/photos/1.jpg", "https://example.com/") {
+		t.Error("generic chrome images")
+	}
+}
+
+// Bug 92: on a real page (headless Chrome), the collector skips logos,
+// icons, SVGs, small avatars and pictures in the header, nav, sidebar and
+// footer, and keeps the post photos.
+func TestCollectSkipsSiteChrome(t *testing.T) {
+	chrome := findChrome()
+	if chrome == "" {
+		t.Skip("no chrome")
+	}
+	pngOf := func(w, h int) []byte {
+		img := image.NewRGBA(image.Rect(0, 0, w, h))
+		for i := range img.Pix {
+			img.Pix[i] = 200
+		}
+		var b bytes.Buffer
+		_ = png.Encode(&b, img)
+		return b.Bytes()
+	}
+	big, wide := pngOf(400, 400), pngOf(600, 200)
+	script, err := os.ReadFile(filepath.Join("extension", "collect.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := `<!DOCTYPE html><html><head><title>someone</title>
+<script>var api = {runtime: {onMessage: {addListener: function (f) { window.bddmListener = f; }}}};</script>
+<script src="/collect.js"></script></head><body>
+<header><img src="/a/wordmark.png" width="300" height="100"></header>
+<nav><img src="/a/heart.png" width="200" height="200"></nav>
+<div class="site-logo"><img src="/a/brand.png" width="300" height="300"></div>
+<img src="/static/icons/like.png" width="200" height="200">
+<img src="/a/lock.svg" width="200" height="200">
+<div class="user-avatar"><img src="/a/me.png" width="40" height="40"></div>
+<img src="/a/small-shown.png" width="48" height="48">
+<main><article><img src="/m/photo1.png" width="300" height="300"><img src="/m/photo2.png" width="300" height="300" alt="Sea"></article></main>
+<aside><img src="/a/suggested.png" width="300" height="300"></aside>
+<footer><img src="/a/foot.png" width="300" height="300"></footer>
+<script>
+window.addEventListener("load", function () {
+  window.bddmListener({type: "bddm-collect-media"}, {}, function (r) {
+    var pre = document.createElement("pre"); pre.id = "result"; pre.textContent = JSON.stringify(r); document.body.appendChild(pre);
+  });
+});
+</script></body></html>`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/page.html":
+			w.Header().Set("Content-Type", "text/html")
+			w.Write([]byte(page))
+		case r.URL.Path == "/collect.js":
+			w.Header().Set("Content-Type", "text/javascript")
+			w.Write(script)
+		case strings.HasSuffix(r.URL.Path, ".svg"):
+			w.Header().Set("Content-Type", "image/svg+xml")
+			w.Write([]byte(`<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400"/>`))
+		case r.URL.Path == "/a/wordmark.png":
+			w.Header().Set("Content-Type", "image/png")
+			w.Write(wide)
+		default:
+			w.Header().Set("Content-Type", "image/png")
+			w.Write(big)
+		}
+	}))
+	defer srv.Close()
+	out, err := execChromeDump(chrome, srv.URL+"/page.html", 1000, 1400).Output()
+	if err != nil {
+		t.Fatalf("chrome: %v", err)
+	}
+	s := string(out)
+	i, j := strings.Index(s, `<pre id="result">`), strings.Index(s, "</pre>")
+	if i < 0 || j < i {
+		t.Fatalf("no result in the page: %.2000s", s)
+	}
+	raw := html.UnescapeString(s[i+len(`<pre id="result">`) : j])
+	var res struct {
+		Items []MediaItem `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(raw), &res); err != nil {
+		t.Fatalf("%v: %s", err, raw)
+	}
+	var got []string
+	for _, it := range res.Items {
+		got = append(got, it.Kind+" "+strings.TrimPrefix(it.Media, srv.URL))
+	}
+	want := []string{"photo /m/photo1.png", "photo /m/photo2.png"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("collected %v, want %v", got, want)
 	}
 }

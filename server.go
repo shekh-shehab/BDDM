@@ -634,7 +634,7 @@ func (s *server) handlePasted(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if isProfileRequest(req) {
-		s.addProfile(w, req, nil, 0)
+		s.addProfile(w, ProfileRequest{AddRequest: req})
 		return
 	}
 	if oneShotPage(req.URL) {
@@ -675,7 +675,7 @@ func (s *server) handleCaptured(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if isProfileRequest(req) {
-		s.addProfile(w, req, nil, 0)
+		s.addProfile(w, ProfileRequest{AddRequest: req})
 		return
 	}
 	if isVideoRequest(req) {
@@ -728,10 +728,10 @@ func isProfileRequest(req AddRequest) bool {
 	return ok
 }
 
-// addProfile opens the profile window for a link (items: what the
-// extension found on the page, or nil).
-func (s *server) addProfile(w http.ResponseWriter, req AddRequest, items []MediaItem, protected int) {
-	id, err := s.m.AddProfile(req, items, protected)
+// addProfile opens the profile window for a link (with what the extension
+// found on the page, if it sent anything).
+func (s *server) addProfile(w http.ResponseWriter, req ProfileRequest) {
+	id, err := s.m.AddProfile(req)
 	if err != nil {
 		writeJSON(w, 400, map[string]any{"ok": false, "error": err.Error()})
 		return
@@ -751,10 +751,7 @@ func (s *server) handleExtProfile(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]any{"ok": false, "error": "Bad request: expected JSON {url, items}"})
 		return
 	}
-	if req.Protected < 0 {
-		req.Protected = 0
-	}
-	s.addProfile(w, req.AddRequest, req.Items, req.Protected)
+	s.addProfile(w, req)
 }
 
 // handleDrive handles Google Drive links: folders open the folder window,
