@@ -271,10 +271,9 @@
 <aside class="sidebar">
   <div class="brand"><img src="icon-32.png" alt="">BDDM</div>
   <button type="button" class="nav on" data-filter="all" data-tab="downloads">All<span class="count" id="navAll">0</span></button>
-  <button type="button" class="nav" data-filter="Video" data-tab="downloads">Videos<span class="count" id="navVideo">0</span></button>
-  <button type="button" class="nav" data-filter="Audio" data-tab="downloads">Music<span class="count" id="navAudio">0</span></button>
-  <button type="button" class="nav" data-filter="Documents" data-tab="downloads">Documents<span class="count" id="navDocuments">0</span></button>
-  <button type="button" class="nav" data-filter="Programs" data-tab="downloads">Programs<span class="count" id="navPrograms">0</span></button>
+  <button type="button" class="nav" data-filter="active" data-tab="downloads">Active<span class="count" id="navActive">0</span></button>
+  <button type="button" class="nav" data-filter="done" data-tab="downloads">Completed<span class="count" id="navDone">0</span></button>
+  <button type="button" class="nav" data-filter="error" data-tab="downloads">Error<span class="count" id="navError">0</span></button>
   <button type="button" class="nav" data-filter="torrent" data-tab="downloads">Torrents<span class="count" id="navTorrent">0</span></button>
   <div class="sidebar-grow"></div>
   <button type="button" class="nav" data-tab="settings" id="navSettings">Settings</button>
@@ -319,8 +318,8 @@
     </div>
     <div class="stats-row" id="statsRow">
       <div class="stat"><span class="meta">Speed</span><b id="statSpeed">0 B/s</b></div>
-      <div class="stat"><span class="meta">Active</span><b id="statActive">0</b></div>
-      <div class="stat"><span class="meta" id="statThirdLabel">Completed today</span><b id="statThird">0</b></div>
+      <div class="stat"><span class="meta">Time left</span><b id="statTimeLeft">-</b></div>
+      <div class="stat"><span class="meta">Upload</span><b id="statUpload">0 B/s</b></div>
     </div>
     <div id="list"></div>
     <div id="emptyList" class="empty">No downloads yet. Paste a link above and press Download.</div>
@@ -554,8 +553,11 @@ function catIcon(cat, status) {
 }
 function jobMatchesFilter(j, filter) {
   if (!filter || filter === "all") return true;
+  if (filter === "active") return j.status === "Downloading" || j.status === "Seeding";
+  if (filter === "done") return j.status === "Done";
+  if (filter === "error") return j.status === "Error";
   if (filter === "torrent") return j.kind === "torrent";
-  return fileCategory(j) === filter;
+  return false;
 }
 function setSeg(el, pct, status) {
   if (!el) return;
@@ -618,35 +620,39 @@ function setJobSegs(r, j, pct, state) {
   r._parts.hidden = !text;
 }
 function updateNavAndStats(jobs, groups) {
-  const counts = { all: 0, Video: 0, Audio: 0, Documents: 0, Programs: 0, torrent: 0 };
-  let speed = 0, up = 0, active = 0, doneToday = 0;
-  const start = new Date(); start.setHours(0, 0, 0, 0);
+  const counts = { all: 0, active: 0, done: 0, error: 0, torrent: 0 };
+  let speed = 0, up = 0, longestEta = -1;
   for (const j of jobs || []) {
     counts.all++;
-    const c = fileCategory(j);
-    if (c in counts) counts[c]++;
-    if (j.status === "Downloading") { active++; speed += (j.speed || 0); }
-    if (j.status === "Seeding") up += (j.upSpeed || 0);
-    else if (j.status === "Downloading") up += (j.upSpeed || 0);
-    if (j.status === "Done" && j.finished && !String(j.finished).startsWith("0001") && new Date(j.finished) >= start) doneToday++;
+    if (j.status === "Downloading" || j.status === "Seeding") counts.active++;
+    if (j.status === "Done") counts.done++;
+    if (j.status === "Error") counts.error++;
+    if (j.kind === "torrent") counts.torrent++;
+    if (j.status === "Downloading") {
+      speed += (j.speed || 0);
+      if (typeof j.eta === "number" && j.eta > longestEta) longestEta = j.eta;
+    }
+    if (j.status === "Seeding" || j.status === "Downloading") up += (j.upSpeed || 0);
   }
   for (const g of groups || []) {
     counts.all++;
-    if (g.status === "Downloading") { active++; speed += (g.speed || 0); }
+    if (g.status === "Downloading" || g.status === "Seeding") counts.active++;
+    if (g.status === "Done") counts.done++;
+    if (g.status === "Error") counts.error++;
+    if (g.status === "Downloading") {
+      speed += (g.speed || 0);
+      if (typeof g.eta === "number" && g.eta > longestEta) longestEta = g.eta;
+    }
   }
   const setCount = (id, n) => { const e = $(id); if (e) e.textContent = String(n); };
   setCount("navAll", counts.all);
-  setCount("navVideo", counts.Video);
-  setCount("navAudio", counts.Audio);
-  setCount("navDocuments", counts.Documents);
-  setCount("navPrograms", counts.Programs);
+  setCount("navActive", counts.active);
+  setCount("navDone", counts.done);
+  setCount("navError", counts.error);
   setCount("navTorrent", counts.torrent);
   if ($("statSpeed")) $("statSpeed").textContent = speed > 0 ? fmtSpeed(speed) : "0 B/s";
-  if ($("statActive")) $("statActive").textContent = String(active);
-  if ($("statThird")) {
-    if (up > 0) { $("statThirdLabel").textContent = "Upload"; $("statThird").textContent = fmtSpeed(up); }
-    else { $("statThirdLabel").textContent = "Completed today"; $("statThird").textContent = String(doneToday); }
-  }
+  if ($("statTimeLeft")) $("statTimeLeft").textContent = fmtETA(longestEta);
+  if ($("statUpload")) $("statUpload").textContent = up > 0 ? fmtSpeed(up) : "0 B/s";
 }
 
 function el(tag, cls, text) {
@@ -1078,7 +1084,7 @@ function renderList(jobs, groups) {
     top.push({ t: j.started, kind: "job", v: j });
   }
   for (const g of groups || []) {
-    if (filter !== "all") continue;
+    if (!jobMatchesFilter(g, filter)) continue;
     top.push({ t: g.started, kind: "group", v: g });
   }
   top.sort((a, b) => (a.t < b.t ? 1 : a.t > b.t ? -1 : 0));
@@ -1444,6 +1450,11 @@ $("url").focus();
   if (scheme === "dark" || scheme === "light") document.documentElement.dataset.scheme = scheme;
   if (q.get("tab") === "settings") {
     const btn = document.querySelector('[data-tab="settings"]');
+    if (btn) btn.click();
+  }
+  const f = q.get("filter");
+  if (f) {
+    const btn = document.querySelector('[data-filter="' + f + '"]');
     if (btn) btn.click();
   }
   if (q.has("add")) {
