@@ -20,7 +20,11 @@ data class VideoJob(
     val referer: String = "",
     val format: String = "best",
     val started: Long = System.currentTimeMillis(),
+    val speed: Double = 0.0,      // bytes/s
+    val total: Long = 0,          // bytes, 0 = unknown
+    val attempt: Int = 1,
 ) {
+    val doneBytes: Long get() = if (total > 0) (total * percent / 100f).toLong() else 0
     val active get() = status == "Queued" || status == "Downloading"
 }
 

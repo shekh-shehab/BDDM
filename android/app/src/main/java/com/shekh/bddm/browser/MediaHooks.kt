@@ -52,12 +52,18 @@ class DetectBridge(
                     MediaDetector.add(tabId, DetectedMedia(url, MediaKind.EMBED, MediaClassifier.titleFor(url, title), page, "iframe"))
                 }
             }
+            "thumb" -> if (url.startsWith("http")) MediaDetector.setPageThumb(tabId, url)
             "video", "audio", "source" -> {
                 if (!url.startsWith("http") || isAdUrl(url)) return
                 val kind = MediaClassifier.classify(url)
                     ?: if (MediaClassifier.isSegment(url)) null
                     else if (type == "audio") MediaKind.AUDIO else MediaKind.DIRECT
-                if (kind != null) MediaDetector.add(tabId, DetectedMedia(url, kind, MediaClassifier.titleFor(url, title), page, type))
+                if (kind != null) MediaDetector.add(tabId, DetectedMedia(
+                    url, kind, MediaClassifier.titleFor(url, title), page, type,
+                    width = o.optInt("w", 0), height = o.optInt("h", 0),
+                    durationSec = o.optDouble("dur", 0.0).let { if (it.isNaN() || it.isInfinite()) 0.0 else it },
+                    thumb = o.optString("poster").takeIf { it.startsWith("http") } ?: "",
+                ))
             }
             else -> {
                 if (url.startsWith("http") && !isAdUrl(url)) MediaDetector.offer(tabId, url, page, title, type)
@@ -92,7 +98,7 @@ object MediaHooks {
     try {
       if (!o || !o.url) return;
       if (o.url.indexOf('http') !== 0 && o.type !== 'mse') return;
-      var k = o.type + '|' + o.url; if (sent[k]) return; sent[k] = 1;
+      var k = o.type + '|' + o.url + '|' + (o.h || 0) + '|' + Math.round(o.dur || 0); if (sent[k]) return; sent[k] = 1;
       o.title = document.title || ''; o.frame = location.href; o.top = (window === window.top);
       var b = window.BDDM; if (b && b.found) b.found(JSON.stringify(o));
     } catch(e){}
@@ -103,7 +109,8 @@ object MediaHooks {
       var s = e.currentSrc || e.src || '';
       if (!s) return;
       if (s.indexOf('blob:') === 0) { send({url: location.href, type:'mse'}); return; }
-      send({url: abs(s), type: (e.tagName || 'video').toLowerCase()});
+      var d = isFinite(e.duration) ? e.duration : 0;
+      send({url: abs(s), type: (e.tagName || 'video').toLowerCase(), w: e.videoWidth || 0, h: e.videoHeight || 0, dur: d, poster: e.poster ? abs(e.poster) : ''});
     } catch(x){}
   }
   try { var xo = XMLHttpRequest.prototype.open;
@@ -125,6 +132,10 @@ object MediaHooks {
         var c = m.getAttribute('content'); if (c) { c = abs(c); if (MEDIA.test(c)) send({url: c, type:'og'}); }
       });
       document.querySelectorAll('iframe[src]').forEach(function(f){ send({url: abs(f.src), type:'iframe'}); });
+      if (window === window.top) {
+        var og = document.querySelector('meta[property="og:image"],meta[name="twitter:image"]');
+        if (og && og.getAttribute('content')) send({url: abs(og.getAttribute('content')), type:'thumb'});
+      }
       document.querySelectorAll('a[href]').forEach(function(a){ var h = a.href || ''; if (MEDIA.test(h)) send({url: h, type:'link'}); });
       if (window.jwplayer) { try {
         var p = window.jwplayer(); var it = p && p.getPlaylistItem && p.getPlaylistItem();

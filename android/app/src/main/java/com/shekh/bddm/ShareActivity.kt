@@ -42,10 +42,7 @@ class ShareActivity : ComponentActivity() {
                             val selected = items.filter { it.selected }
                             PendingQueue.close()
                             selected.forEach { item ->
-                                when (item.kind) {
-                                    PendingDownload.Kind.Video -> Downloads.startVideo(this, item, later)
-                                    else -> Downloads.startHttp(item.url, later)
-                                }
+                                Downloads.startPending(this, item, later)
                             }
                             finish()
                         },

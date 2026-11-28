@@ -20,6 +20,12 @@ data class PendingDownload(
     val referer: String = "",
     /** True while yt-dlp is still reading the available qualities. */
     val loading: Boolean = false,
+    /** File name suggested by the server/page (Content-Disposition or title). */
+    val fileName: String = "",
+    /** Size reported by the browser, -1/0 = unknown. */
+    val size: Long = 0,
+    /** Extra request headers (cookies, user agent) for the multi-part engine. Not persisted. */
+    val headers: Map<String, String> = emptyMap(),
 ) {
     enum class Kind { File, Video }
 }

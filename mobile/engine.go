@@ -16,7 +16,7 @@ import (
 	"time"
 )
 
-const AppVersion = "1.6.1"
+const AppVersion = "1.6.3"
 
 const (
 	StatusQueued      = "Queued"
@@ -115,6 +115,13 @@ func (e *Engine) notify() {
 // Add starts (or queues) an HTTP or HTTPS file download. dir and filename may be empty.
 // Returns the job id.
 func (e *Engine) Add(rawURL, dir, filename string) (string, error) {
+	return e.AddWithHeaders(rawURL, dir, filename, "")
+}
+
+// AddWithHeaders is Add plus extra request headers as a JSON object, for example
+// {"Cookie":"a=b","Referer":"https://site/","User-Agent":"..."} taken from the browser.
+func (e *Engine) AddWithHeaders(rawURL, dir, filename, headersJSON string) (string, error) {
+	headers := parseHeaders(headersJSON)
 	rawURL = strings.TrimSpace(rawURL)
 	u, err := url.Parse(rawURL)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
@@ -138,6 +145,7 @@ func (e *Engine) Add(rawURL, dir, filename string) (string, error) {
 		Status:  StatusQueued,
 		Started: time.Now(),
 		AutoDir: dir == "" || dir == e.settings.DownloadDir,
+		Headers: headers,
 	}
 	e.jobs = append(e.jobs, j)
 	e.scheduleLocked()
@@ -189,6 +197,33 @@ func (e *Engine) Resume(id string) error {
 	j.Error = ""
 	j.Interrupted = false
 	e.scheduleLocked()
+	e.saveHistoryLocked()
+	go e.notify()
+	return nil
+}
+
+// UpdateURL replaces an expired link of a paused or failed download (link refresh).
+// The bytes already downloaded are kept when the new link serves the same file size.
+func (e *Engine) UpdateURL(id, rawURL string) error {
+	rawURL = strings.TrimSpace(rawURL)
+	u, err := url.Parse(rawURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return errors.New("Please enter a valid http:// or https:// link.")
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	j := e.findLocked(id)
+	if j == nil {
+		return errors.New("download not found")
+	}
+	if j.Status == StatusDownloading || j.Status == StatusQueued {
+		return errors.New("pause the download before changing its link")
+	}
+	if j.Status == StatusDone {
+		return errors.New("this download is already finished")
+	}
+	j.URL = rawURL
+	j.Error = ""
 	e.saveHistoryLocked()
 	go e.notify()
 	return nil

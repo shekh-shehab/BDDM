@@ -12,10 +12,60 @@ import kotlinx.coroutines.withContext
 import com.shekh.bddm.service.DownloadService
 
 object Downloads {
-    fun startHttp(url: String, later: Boolean) {
-        val id = EngineHolder.engine?.add(url, com.shekh.bddm.BDDMApp.instance.prefs.downloadDirFile().absolutePath, "")
-        if (later && id != null) EngineHolder.engine?.pause(id)
+    /**
+     * Regular file download on the multi-part engine (item 108). Headers carry the browser's
+     * cookies/referer/user agent so links that need the browser session still work.
+     */
+    fun startHttp(url: String, later: Boolean, fileName: String = "", headers: Map<String, String> = emptyMap(), ctx: Context = com.shekh.bddm.BDDMApp.instance): String? {
+        val direct = GoogleDrive.directUrl(url.trim())
+        val h = HashMap(headers.filterValues { it.isNotBlank() })
+        if (!h.containsKey("Cookie")) {
+            try { CookieManager.getInstance().getCookie(direct)?.let { if (it.isNotBlank()) h["Cookie"] = it } } catch (_: Throwable) {}
+        }
+        if (!h.containsKey("User-Agent")) {
+            try { h["User-Agent"] = FilterEngine.chromeLikeUa(WebSettings.getDefaultUserAgent(ctx)) } catch (_: Throwable) {}
+        }
+        val id = try {
+            EngineHolder.engine?.addWithHeaders(direct, com.shekh.bddm.BDDMApp.instance.prefs.downloadDirFile().absolutePath,
+                fileName, org.json.JSONObject(h as Map<*, *>).toString())
+        } catch (_: Exception) { null }
+        if (id != null) {
+            if (later) EngineHolder.engine?.pause(id) else NetworkWatcher.holdIfNeeded(id)
+        }
         EngineHolder.refresh()
+        if (!later) kick(ctx)
+        return id
+    }
+
+    /** Starts whatever the confirmation sheet holds. */
+    fun startPending(ctx: Context, item: PendingDownload, later: Boolean) {
+        when (item.kind) {
+            PendingDownload.Kind.Video -> startVideo(ctx, item, later)
+            else -> startHttp(item.url, later, item.fileName, item.headers + (if (item.referer.isNotBlank()) mapOf("Referer" to item.referer) else emptyMap()), ctx)
+        }
+    }
+
+    /** Makes sure the foreground service is running to show progress; it stops itself when idle (bug 113). */
+    fun kick(ctx: Context) {
+        try {
+            ContextCompat.startForegroundService(ctx, Intent(ctx, DownloadService::class.java).setAction(DownloadService.ACTION_KICK))
+        } catch (_: Exception) { }
+    }
+
+    /** Item 47: hand a link to Android's own download manager when BDDM's engine cannot fetch it. */
+    fun systemFallback(ctx: Context, url: String, fileName: String = ""): Boolean {
+        return try {
+            val dm = ctx.getSystemService(android.app.DownloadManager::class.java) ?: return false
+            val name = fileName.ifBlank { android.webkit.URLUtil.guessFileName(url, null, null) }
+            val r = android.app.DownloadManager.Request(android.net.Uri.parse(url))
+                .setTitle(name)
+                .setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                .setDestinationInExternalPublicDir(android.os.Environment.DIRECTORY_DOWNLOADS, "BDDM/$name")
+            try { CookieManager.getInstance().getCookie(url)?.let { r.addRequestHeader("Cookie", it) } } catch (_: Throwable) {}
+            try { r.addRequestHeader("User-Agent", FilterEngine.chromeLikeUa(WebSettings.getDefaultUserAgent(ctx))) } catch (_: Throwable) {}
+            dm.enqueue(r)
+            true
+        } catch (_: Exception) { false }
     }
 
     fun startVideo(ctx: Context, item: PendingDownload, later: Boolean) {

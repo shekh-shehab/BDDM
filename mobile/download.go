@@ -45,7 +45,7 @@ type probeInfo struct {
 func (e *Engine) download(ctx context.Context, j *job) error {
 	j.setMessage("Connecting...")
 	e.notify()
-	info, err := e.probe(ctx, j.URL)
+	info, err := e.probe(ctx, j.URL, j.Headers)
 	if err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -83,7 +83,7 @@ func (e *Engine) download(ctx context.Context, j *job) error {
 
 	var parts []partState
 	resuming := false
-	if st, err := loadDiskState(statePath); err == nil && st.URL == j.URL && fileExists(partPath) {
+	if st, err := loadDiskState(statePath); err == nil && (st.URL == j.URL || st.Name == name) && fileExists(partPath) {
 		if st.Size == info.Size && (info.ETag == "" || st.ETag == "" || st.ETag == info.ETag) {
 			parts = st.Parts
 			resuming = true
@@ -151,7 +151,7 @@ func (e *Engine) download(ctx context.Context, j *job) error {
 			if ctx.Err() != nil {
 				return
 			}
-			err := e.fetchPart(ctx, f, j.URL, &parts[i], info, &done, func() {
+			err := e.fetchPart(ctx, f, j.URL, j.Headers, &parts[i], info, &done, func() {
 				e.publishProgress(j, parts, info.Size, &done)
 			})
 			if err == nil || ctx.Err() != nil {
@@ -253,15 +253,14 @@ func (e *Engine) publishProgress(j *job, parts []partState, size int64, done *at
 	e.notify()
 }
 
-func (e *Engine) fetchPart(ctx context.Context, f *os.File, rawURL string, p *partState, info probeInfo, done *atomic.Int64, tick func()) error {
+func (e *Engine) fetchPart(ctx context.Context, f *os.File, rawURL string, headers map[string]string, p *partState, info probeInfo, done *atomic.Int64, tick func()) error {
 	from := p.From + p.Done
 	to := p.To
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return err
 	}
-	req.Header.Set("User-Agent", userAgent)
-	req.Header.Set("Accept", "*/*")
+	applyHeaders(req, headers)
 	if to >= 0 {
 		req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", from, to))
 	} else if from > 0 {
@@ -338,15 +337,14 @@ func planParts(size int64, n int) []partState {
 	return parts
 }
 
-func (e *Engine) probe(ctx context.Context, rawURL string) (probeInfo, error) {
+func (e *Engine) probe(ctx context.Context, rawURL string, headers map[string]string) (probeInfo, error) {
 	// Prefer a 1-byte range GET: some servers lie on HEAD and this also
 	// tells us whether Range works.
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return probeInfo{}, err
 	}
-	req.Header.Set("User-Agent", userAgent)
-	req.Header.Set("Accept", "*/*")
+	applyHeaders(req, headers)
 	req.Header.Set("Range", "bytes=0-0")
 	resp, err := e.client.c.Do(req)
 	if err != nil {

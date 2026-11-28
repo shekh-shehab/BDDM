@@ -1,6 +1,7 @@
 package mobile
 
 import (
+	"encoding/json"
 	"io"
 	"mime"
 	"net/http"
@@ -180,4 +181,41 @@ func newHTTPClient() *httpClient {
 			ForceAttemptHTTP2:     true,
 		},
 	}}
+}
+
+func parseHeaders(raw string) map[string]string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	var m map[string]string
+	if err := json.Unmarshal([]byte(raw), &m); err != nil {
+		return nil
+	}
+	out := map[string]string{}
+	for k, v := range m {
+		k = strings.TrimSpace(k)
+		v = strings.TrimSpace(v)
+		if k == "" || v == "" || strings.ContainsAny(k+v, "\r\n") {
+			continue
+		}
+		switch strings.ToLower(k) {
+		case "range", "host", "content-length", "accept-encoding", "connection":
+			continue
+		}
+		out[k] = v
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// applyHeaders sets the default browser-like headers, then the job's own.
+func applyHeaders(req *http.Request, h map[string]string) {
+	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("Accept", "*/*")
+	for k, v := range h {
+		req.Header.Set(k, v)
+	}
 }

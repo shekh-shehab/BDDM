@@ -237,6 +237,8 @@ type job struct {
 	Interrupted bool      `json:"interrupted,omitempty"`
 	AutoDir     bool      `json:"autoDir,omitempty"`
 	Kind        string    `json:"kind,omitempty"`
+	// Headers sent with every request (cookies, referer, user agent from the browser). Item 108.
+	Headers map[string]string `json:"headers,omitempty"`
 
 	mu        sync.Mutex
 	speed     float64

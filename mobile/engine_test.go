@@ -320,3 +320,60 @@ func TestSnapshotContainsParts(t *testing.T) {
 	}
 	fmt.Fprintf(io.Discard, "")
 }
+
+func TestHeadersAreSentAndUnsafeOnesDropped(t *testing.T) {
+	h := parseHeaders(`{"Cookie":"sid=1","Referer":"https://site.test/page","Range":"bytes=0-","Host":"x","Bad":"a\r\nb","User-Agent":"UA-test"}`)
+	if h["Cookie"] != "sid=1" || h["Referer"] != "https://site.test/page" || h["User-Agent"] != "UA-test" {
+		t.Fatalf("headers lost: %v", h)
+	}
+	for _, k := range []string{"Range", "Host", "Bad"} {
+		if _, ok := h[k]; ok {
+			t.Fatalf("%s must be dropped", k)
+		}
+	}
+	if parseHeaders("") != nil || parseHeaders("not json") != nil {
+		t.Fatal("empty/invalid must give nil")
+	}
+	var got http.Header
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Clone()
+		w.Header().Set("Content-Length", "5")
+		w.Write([]byte("hello"))
+	}))
+	defer srv.Close()
+	req, _ := http.NewRequest("GET", srv.URL, nil)
+	applyHeaders(req, h)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if got.Get("Cookie") != "sid=1" || got.Get("User-Agent") != "UA-test" || got.Get("Referer") == "" {
+		t.Fatalf("server did not get headers: %v", got)
+	}
+}
+
+func TestUpdateURLOnlyWhenStopped(t *testing.T) {
+	e, err := New(t.TempDir(), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	e.mu.Lock()
+	j := &job{ID: "x1", URL: "https://old.test/a.iso", Status: StatusError, Error: "HTTP 403"}
+	e.jobs = append(e.jobs, j)
+	e.mu.Unlock()
+	if err := e.UpdateURL("x1", "ftp://bad"); err == nil {
+		t.Fatal("bad link accepted")
+	}
+	if err := e.UpdateURL("x1", "https://new.test/a.iso"); err != nil {
+		t.Fatal(err)
+	}
+	if j.URL != "https://new.test/a.iso" || j.Error != "" {
+		t.Fatalf("not updated: %+v", j)
+	}
+	j.Status = StatusDownloading
+	if err := e.UpdateURL("x1", "https://new2.test/a.iso"); err == nil {
+		t.Fatal("must refuse while downloading")
+	}
+}

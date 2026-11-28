@@ -40,6 +40,7 @@ fun SettingsScreen() {
     var autoUpd by remember { mutableStateOf(prefs.checkUpdates) }
     var folder by remember { mutableStateOf(prefs.downloadDirFile().absolutePath) }
     var parts by remember { mutableStateOf("8") }
+    var maxActive by remember { mutableStateOf("3") }
     var limitLabel by remember { mutableStateOf("Unlimited") }
     var updateMsg by remember { mutableStateOf<String?>(null) }
     var updateUrl by remember { mutableStateOf<String?>(null) }
@@ -50,6 +51,7 @@ fun SettingsScreen() {
         try {
             val o = JSONObject(EngineHolder.engine?.settingsJSON() ?: "{}")
             parts = o.optInt("parts", 8).toString()
+            maxActive = o.optInt("maxActive", 3).toString()
             val lim = o.optLong("httpDownloadLimit", 0)
             limitLabel = if (lim <= 0) "Unlimited" else "${lim / 1024} KB/s"
             theme = o.optString("theme", theme)
@@ -93,7 +95,7 @@ fun SettingsScreen() {
         Card(shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp)) {
                 Text("Speed limits", fontWeight = FontWeight.SemiBold)
-                Text("A limit of 0 is unlimited. Applies to regular HTTP downloads.",
+                Text("A limit of 0 is unlimited. Applies to file and video downloads.",
                     fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 val choices = listOf(0L to "Unlimited", 256L * 1024 to "256 KB/s", 512L * 1024 to "512 KB/s", 1024L * 1024 to "1 MB/s", 4L * 1024 * 1024 to "4 MB/s")
                 choices.forEach { (bps, label) ->
@@ -108,6 +110,11 @@ fun SettingsScreen() {
                     parts = it.filter { ch -> ch.isDigit() }.take(2)
                     parts.toIntOrNull()?.let { n -> if (n in 1..32) pushEngine("parts" to n) }
                 }, label = { Text("Parts per download") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = maxActive, onValueChange = {
+                    maxActive = it.filter { ch -> ch.isDigit() }.take(2)
+                    maxActive.toIntOrNull()?.let { n -> if (n in 1..10) pushEngine("maxActive" to n) }
+                }, label = { Text("Downloads at the same time (1-10)") }, supportingText = { Text("Extra downloads wait in the queue and start by themselves.") },
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
             }
         }
         Spacer(Modifier.height(10.dp))
@@ -154,8 +161,8 @@ fun SettingsScreen() {
                     closeDays = it.filter { ch -> ch.isDigit() }.take(3)
                     closeDays.toIntOrNull()?.let { n -> prefs.autoCloseTabsDays = n; pushEngine("autoCloseTabsDays" to n) }
                 }, label = { Text("Auto-close tabs after N days") }, modifier = Modifier.fillMaxWidth())
-                Toggle("Wi-Fi only", "Pause new downloads on mobile data.", wifiOnly) {
-                    wifiOnly = it; prefs.wifiOnly = it; pushEngine("wifiOnly" to it)
+                Toggle("Wi-Fi only", "Downloads pause on mobile data and continue on Wi-Fi.", wifiOnly) {
+                    wifiOnly = it; prefs.wifiOnly = it; pushEngine("wifiOnly" to it); com.shekh.bddm.data.NetworkWatcher.apply()
                 }
                 Toggle("Show notifications", null, notify) { notify = it; prefs.notifications = it; pushEngine("notifications" to it) }
                 if (policies.isNotEmpty()) {

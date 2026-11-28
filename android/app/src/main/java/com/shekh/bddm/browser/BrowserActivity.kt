@@ -307,6 +307,13 @@ fun BrowserRoot(act: BrowserActivity) {
                     }
                     IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, "Menu") }
                     DropdownMenu(showMenu, { showMenu = false }) {
+                        // Item 111: a clear way back to the download list.
+                        DropdownMenuItem(
+                            text = { Text("BDDM downloads") },
+                            leadingIcon = { Icon(Icons.Default.Download, null) },
+                            onClick = { showMenu = false; openDownloads(act) },
+                        )
+                        HorizontalDivider()
                         DropdownMenuItem(text = { Text("New tab") }, onClick = {
                             showMenu = false; store.addTab(); idx = store.currentIndex(); address = ""; tabTick++
                         })
@@ -320,6 +327,19 @@ fun BrowserRoot(act: BrowserActivity) {
                         DropdownMenuItem(text = { Text("History") }, onClick = { showMenu = false; showHistory = true })
                         DropdownMenuItem(text = { Text("Bookmark this page") }, onClick = {
                             showMenu = false; store.addBookmark(tab.title, tab.url)
+                        })
+                        DropdownMenuItem(text = { Text("Download all videos on this page") }, onClick = {
+                            showMenu = false
+                            if (!tab.url.startsWith("http")) { snack = "Open a page first."; return@DropdownMenuItem }
+                            snack = "Looking for videos on this page…"
+                            scope.launch {
+                                val n = findAllOnPage(tab.url, tab.title)
+                                snack = if (n > 0) "Found $n video(s)." else "No video list found on this page."
+                            }
+                        })
+                        DropdownMenuItem(text = { Text("Save as PDF") }, onClick = {
+                            showMenu = false
+                            saveAsPdf(act, tab.title.ifBlank { "page" })
                         })
                         DropdownMenuItem(text = { Text("Share") }, onClick = {
                             showMenu = false
@@ -352,6 +372,30 @@ fun BrowserRoot(act: BrowserActivity) {
                                     MediaHooks.BRIDGE_NAME,
                                 )
                                 val docStart = MediaHooks.installDocumentStart(this)
+                                // Bug 108: WebView ignores downloads unless a listener takes them.
+                                setDownloadListener { dUrl, dUa, disposition, mime, length ->
+                                    if (dUrl.startsWith("blob:") || dUrl.startsWith("data:")) {
+                                        snack = "This file is created inside the page, so BDDM can't download it."
+                                        return@setDownloadListener
+                                    }
+                                    val name = URLUtil.guessFileName(dUrl, disposition, mime)
+                                    val headers = HashMap<String, String>()
+                                    if (!dUa.isNullOrBlank()) headers["User-Agent"] = FilterEngine.chromeLikeUa(dUa)
+                                    try { CookieManager.getInstance().getCookie(dUrl)?.let { if (it.isNotBlank()) headers["Cookie"] = it } } catch (_: Throwable) {}
+                                    val host = AdBlocker.hostOf(dUrl) ?: ""
+                                    PendingQueue.add(
+                                        PendingDownload(
+                                            url = dUrl,
+                                            title = name,
+                                            subtitle = listOfNotNull(host.ifBlank { null }, if (length > 0) formatBytes(length) else null, mime?.takeIf { it.isNotBlank() }).joinToString(" · "),
+                                            kind = PendingDownload.Kind.File,
+                                            referer = tab.url.takeIf { it.startsWith("http") } ?: "",
+                                            fileName = name,
+                                            size = length,
+                                            headers = headers,
+                                        )
+                                    )
+                                }
                                 webViewClient = object : WebViewClient() {
                                     override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
                                         val pageHost = AdBlocker.hostOf(tab.url) ?: request.url.host ?: ""
@@ -514,19 +558,29 @@ fun BrowserRoot(act: BrowserActivity) {
             }
         }
         if (showDetected) {
-            DetectedSheet(detected, onDismiss = { showDetected = false }, onDownload = { item ->
-                showDetected = false
-                val p = item.toPending()
-                PendingQueue.add(p)
-                Downloads.enrichAsync(scope, p.url, p.referer)
-            }, onDownloadAll = {
-                showDetected = false
-                detected.forEach {
-                    val p = it.toPending()
-                    PendingQueue.add(p)
-                    Downloads.enrichAsync(scope, p.url, p.referer)
-                }
-            })
+            LaunchedEffect(detected) { MediaEnricher.enrichAll(scope, tab.id, detected) }
+            DetectedMediaSheet(
+                items = detected,
+                pageThumb = MediaDetector.pageThumb(tab.id),
+                onDismiss = { showDetected = false },
+                onDownload = { picks, later ->
+                    showDetected = false
+                    picks.forEach { Downloads.startPending(ctx, it.toPending(), later) }
+                    snack = when {
+                        picks.isEmpty() -> null
+                        later -> "Saved ${picks.size} for later."
+                        else -> "Started ${picks.size} download${if (picks.size == 1) "" else "s"}."
+                    }
+                },
+                onPreview = { pick -> preview(act, pick) { snack = it } },
+                onCopy = { u ->
+                    val cm = ctx.getSystemService(android.content.ClipboardManager::class.java)
+                    cm?.setPrimaryClip(android.content.ClipData.newPlainText("link", u))
+                    snack = "Link copied."
+                },
+                onRemove = { urls -> MediaDetector.remove(tab.id, urls) },
+                onOpenDownloads = { showDetected = false; openDownloads(act) },
+            )
         }
         if (sheetOpen && pending.isNotEmpty()) {
             ConfirmQueueSheet(
@@ -537,10 +591,7 @@ fun BrowserRoot(act: BrowserActivity) {
                     val selected = pending.filter { it.selected }
                     PendingQueue.close()
                     selected.forEach { item ->
-                        when (item.kind) {
-                            PendingDownload.Kind.Video -> Downloads.startVideo(ctx, item, later)
-                            else -> Downloads.startHttp(item.url, later)
-                        }
+                        Downloads.startPending(ctx, item, later)
                     }
                 },
             )
@@ -708,35 +759,39 @@ private fun SuggestionList(items: List<Suggestion>, modifier: Modifier, onPick: 
     }
 }
 
-@Composable
-private fun DetectedSheet(items: List<DetectedMedia>, onDismiss: () -> Unit, onDownload: (DetectedMedia) -> Unit, onDownloadAll: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Found on this page") },
-        text = {
-            LazyColumn {
-                items(items.size) { i ->
-                    val m = items[i]
-                    ListItem(
-                        headlineContent = { Text(m.title.ifBlank { m.url }, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                        supportingContent = { Text(m.kind.label + if (m.host.isNotBlank()) " · " + m.host else "", maxLines = 1, fontSize = 12.sp) },
-                        trailingContent = { TextButton(onClick = { onDownload(m) }) { Text("Download") } },
-                    )
-                }
-            }
-        },
-        confirmButton = { if (items.size > 1) TextButton(onClick = onDownloadAll) { Text("Add all") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Close") } },
-    )
+/** Turns a pick from the sheet into a download: files go to the multi-part engine, streams to yt-dlp. */
+private fun MediaPick.toPending(): PendingDownload {
+    val m = option.item
+    return when {
+        audioOnly -> PendingDownload(url = m.url, title = group.title, kind = PendingDownload.Kind.Video, qualityId = "audio:best", referer = m.pageUrl)
+        m.kind == MediaKind.DIRECT || m.kind == MediaKind.AUDIO -> PendingDownload(
+            url = m.url, title = group.title, kind = PendingDownload.Kind.File,
+            fileName = MediaGrouping.fileNameFor(group.title, m.url, option.height),
+            referer = m.pageUrl, size = option.sizeBytes,
+        )
+        else -> PendingDownload(
+            url = m.url, title = group.title, kind = PendingDownload.Kind.Video,
+            qualityId = if (option.height > 0) "h:${option.height}" else "best", referer = m.pageUrl,
+        )
+    }
 }
 
-private fun DetectedMedia.toPending() = PendingDownload(
-    url = url,
-    title = title.ifBlank { url },
-    subtitle = kind.label + if (host.isNotBlank()) " · $host" else "",
-    kind = PendingDownload.Kind.Video,
-    referer = pageUrl,
-)
+/** Opens the stream in a video player app (VLC, MX Player, ...). */
+private fun preview(act: BrowserActivity, pick: MediaPick, onMessage: (String) -> Unit) {
+    val m = pick.option.item
+    val url = if (m.kind == MediaKind.HLS) m.variants.firstOrNull { it.height == pick.option.height }?.url ?: m.url else m.url
+    val type = when (m.kind) {
+        MediaKind.HLS -> "application/x-mpegURL"
+        MediaKind.DASH -> "application/dash+xml"
+        MediaKind.AUDIO -> "audio/*"
+        else -> "video/*"
+    }
+    try {
+        act.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(android.net.Uri.parse(url), type).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    } catch (_: Exception) {
+        onMessage("No video player app found to preview this.")
+    }
+}
 
 /** Network-level capture: sees every request from every frame, including players that never touch the DOM. */
 private fun recordRequest(tabId: String, request: WebResourceRequest, pageHost: String, ad: AdBlocker, pageUrl: String) {
@@ -755,6 +810,27 @@ private fun recordRequest(tabId: String, request: WebResourceRequest, pageHost: 
     if (ad.isAdUrl(u, pageHost)) return
     val page = request.requestHeaders?.get("Referer")?.takeIf { it.startsWith("http") } ?: pageUrl
     MediaDetector.offer(tabId, u, page, "", "network")
+}
+
+private fun openDownloads(act: BrowserActivity) {
+    act.startActivity(Intent(act, com.shekh.bddm.MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP))
+}
+
+/** Item 53: Android's print dialog offers "Save as PDF" and lets the user pick the folder. */
+private fun saveAsPdf(act: BrowserActivity, title: String) {
+    val wv = act.webView ?: return
+    val pm = act.getSystemService(android.print.PrintManager::class.java) ?: return
+    val name = YtDlp.safeFileName(title).ifBlank { "page" }
+    pm.print(name, wv.createPrintDocumentAdapter(name), android.print.PrintAttributes.Builder().build())
+}
+
+/** Profile / playlist / channel pages (PC items 90/92): list every video yt-dlp can see. */
+private suspend fun findAllOnPage(pageUrl: String, pageTitle: String): Int {
+    val list = try { withContext(Dispatchers.IO) { YtDlp.listEntries(pageUrl, referer = pageUrl) } } catch (_: Throwable) { emptyList() }
+    list.forEach { (u, title) ->
+        PendingQueue.add(PendingDownload(url = u, title = title.ifBlank { u }, subtitle = pageTitle, kind = PendingDownload.Kind.Video, referer = pageUrl))
+    }
+    return list.size
 }
 
 private fun WebView.cookie(incognito: Boolean) {

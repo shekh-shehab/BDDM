@@ -20,9 +20,21 @@ data class DetectedMedia(
     val pageUrl: String,
     val via: String,
     val at: Long = System.currentTimeMillis(),
+    // Filled in later by the page hooks or the network probe (item 112).
+    val width: Int = 0,
+    val height: Int = 0,
+    val durationSec: Double = 0.0,
+    val sizeBytes: Long = 0,
+    val thumb: String = "",
+    val mime: String = "",
+    val variants: List<MediaVariant> = emptyList(),
+    val probed: Boolean = false,
 ) {
     val host: String get() = MediaClassifier.hostOf(url) ?: ""
 }
+
+/** One quality of an HLS/DASH stream (or a same-named file in another resolution). */
+data class MediaVariant(val url: String, val width: Int, val height: Int, val bandwidth: Long, val sizeBytes: Long = 0)
 
 /** Pure URL classification so it can be unit-tested without Android. */
 object MediaClassifier {
@@ -156,12 +168,16 @@ object MediaDetector {
             val k = MediaClassifier.key(item.url)
             val existing = list.indexOfFirst { MediaClassifier.key(it.url) == k }
             if (existing >= 0) {
-                // Keep the better title if we only had a file name before.
+                // Keep the better title and any metadata the newer hint carries.
                 val old = list[existing]
-                if (old.title != item.title && item.title.length > old.title.length && item.kind == old.kind) {
-                    list[existing] = old.copy(title = item.title)
-                    publish()
-                }
+                val merged = old.copy(
+                    title = if (item.title.length > old.title.length && item.kind == old.kind) item.title else old.title,
+                    width = if (old.width > 0) old.width else item.width,
+                    height = if (old.height > 0) old.height else item.height,
+                    durationSec = if (old.durationSec > 0) old.durationSec else item.durationSec,
+                    thumb = old.thumb.ifBlank { item.thumb },
+                )
+                if (merged != old) { list[existing] = merged; publish() }
                 return false
             }
             if (list.size >= MAX_PER_TAB) list.removeAt(list.lastIndex)
@@ -198,8 +214,36 @@ object MediaDetector {
         }
     }
 
+    /** Updates one entry in place (metadata from probes). */
+    fun updateMeta(tabId: String, url: String, f: (DetectedMedia) -> DetectedMedia) {
+        synchronized(lock) {
+            val list = map[tabId] ?: return
+            val k = MediaClassifier.key(url)
+            val i = list.indexOfFirst { MediaClassifier.key(it.url) == k }
+            if (i < 0) return
+            val n = f(list[i])
+            if (n != list[i]) { list[i] = n; publish() }
+        }
+    }
+
+    /** Removes entries the user cleared from the sheet. */
+    fun remove(tabId: String, urls: Collection<String>) {
+        val keys = urls.map { MediaClassifier.key(it) }.toSet()
+        synchronized(lock) {
+            val list = map[tabId] ?: return
+            if (list.removeAll { MediaClassifier.key(it.url) in keys }) publish()
+        }
+    }
+
+    private val pageThumbs = HashMap<String, String>()
+    fun setPageThumb(tabId: String, url: String) { synchronized(lock) { pageThumbs[tabId] = url } }
+    fun pageThumb(tabId: String): String = synchronized(lock) { pageThumbs[tabId].orEmpty() }
+
     fun clear(tabId: String) {
-        synchronized(lock) { if (map.remove(tabId) != null) publish() }
+        synchronized(lock) {
+            pageThumbs.remove(tabId)
+            if (map.remove(tabId) != null) publish()
+        }
     }
 
     private fun publish() {

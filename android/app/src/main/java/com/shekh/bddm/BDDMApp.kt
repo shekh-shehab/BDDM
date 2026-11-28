@@ -32,6 +32,12 @@ class BDDMApp : Application() {
         val dl = prefs.downloadDirFile().apply { mkdirs() }
         EngineHolder.init(cfg.absolutePath, dl.absolutePath)
         LaterStore.init(this)
+        com.shekh.bddm.data.NetworkWatcher.init(this, prefs)
+        com.shekh.bddm.data.NetworkWatcher.apply()
+        val s = EngineHolder.snap.value
+        if (s.contains("\"status\":\"Downloading\"") || s.contains("\"status\":\"Queued\"")) {
+            com.shekh.bddm.data.Downloads.kick(this)
+        }
         adBlocker = AdBlocker(this, prefs)
         adBlocker.loadAsync()
         VideoJobs.init(this)

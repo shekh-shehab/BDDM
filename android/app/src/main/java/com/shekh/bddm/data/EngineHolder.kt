@@ -18,7 +18,16 @@ object EngineHolder {
     fun init(configDir: String, downloadDir: String) {
         if (engine != null) return
         val e = Mobile.new_(configDir, downloadDir)
-        e.setListener(Listener { refresh() })
+        e.setListener(Listener {
+            refresh()
+            // Bug 113/110: the service runs only while something downloads; start it when work appears.
+            val s = _snap.value
+            if (!com.shekh.bddm.service.DownloadService.running &&
+                (s.contains("\"status\":\"Downloading\"") || s.contains("\"status\":\"Queued\""))
+            ) {
+                Downloads.kick(com.shekh.bddm.BDDMApp.instance)
+            }
+        })
         engine = e
         refresh()
     }

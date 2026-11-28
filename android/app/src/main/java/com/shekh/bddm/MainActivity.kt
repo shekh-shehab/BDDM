@@ -29,7 +29,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        startService(Intent(this, DownloadService::class.java))
         if (Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
@@ -134,10 +133,7 @@ fun AppRoot() {
                     val selected = pending.filter { it.selected }
                     PendingQueue.close()
                     selected.forEach { item ->
-                        when (item.kind) {
-                            PendingDownload.Kind.Video -> Downloads.startVideo(ctx, item, later)
-                            else -> Downloads.startHttp(item.url, later)
-                        }
+                        Downloads.startPending(ctx, item, later)
                     }
                 },
             )

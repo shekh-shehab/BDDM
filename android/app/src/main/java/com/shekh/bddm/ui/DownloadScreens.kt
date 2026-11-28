@@ -101,8 +101,11 @@ fun DownloadListScreen(
         }
         Spacer(Modifier.height(8.dp))
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            StatCard("Speed", formatSpeed(snap.speed), Modifier.weight(1f))
-            StatCard("Time left", formatEta(snap.eta), Modifier.weight(1f))
+            val vActive = allVideo.filter { it.status == "Downloading" }
+            val totalSpeed = snap.speed + vActive.sumOf { it.speed }
+            val vEta = vActive.maxOfOrNull { it.eta } ?: -1L
+            StatCard("Speed", formatSpeed(totalSpeed), Modifier.weight(1f))
+            StatCard("Time left", formatEta(maxOf(snap.eta, vEta)), Modifier.weight(1f))
             StatCard("Upload", formatSpeed(snap.upload), Modifier.weight(1f))
         }
         Spacer(Modifier.height(8.dp))
@@ -208,9 +211,15 @@ private fun VideoJobCard(v: VideoJob, onCancel: () -> Unit, onRetry: () -> Unit,
         }
         Spacer(Modifier.height(6.dp))
         val meta = buildString {
-            append("Video")
+            append(if (v.format.startsWith("audio:")) "Audio (MP3)" else "Video")
             if (v.status == "Downloading" && v.percent > 0f) append("  ·  ").append(v.percent.toInt()).append("%")
-            if (v.status == "Downloading" && v.eta > 0) append("  ·  ").append(formatEta(v.eta))
+            if (v.total > 0) {
+                append("  ·  ")
+                if (v.status == "Downloading") append(formatBytes(v.doneBytes)).append(" / ")
+                append(formatBytes(v.total))
+            }
+            if (v.status == "Downloading" && v.speed > 0) append("  ·  ").append(formatSpeed(v.speed))
+            if (v.status == "Downloading" && v.eta > 0) append("  ·  ").append(formatEta(v.eta)).append(" left")
             if (v.message.isNotBlank()) append("  ·  ").append(v.message)
             if (v.status == "Done" && v.file.isNotBlank()) append("  ·  ").append(v.file.substringAfterLast('/'))
         }
@@ -313,6 +322,9 @@ fun StatusBadge(status: String) {
 @Composable
 fun DetailScreen(job: Job, onBack: () -> Unit, onPause: () -> Unit, onResume: () -> Unit, onDelete: (Boolean) -> Unit) {
     var confirm by remember { mutableStateOf(false) }
+    var linkDialog by remember { mutableStateOf(false) }
+    var newLink by remember { mutableStateOf("") }
+    var linkMsg by remember { mutableStateOf("") }
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back") }
@@ -348,7 +360,39 @@ fun DetailScreen(job: Job, onBack: () -> Unit, onPause: () -> Unit, onResume: ()
                 }
                 OutlinedButton(onClick = { confirm = true }, modifier = Modifier.weight(1f)) { Text("Delete") }
             }
+            if (job.status == "Paused" || job.status == "Error") {
+                val ctx = androidx.compose.ui.platform.LocalContext.current
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
+                    // Item 44: replace an expired link and continue from where it stopped.
+                    TextButton(onClick = { newLink = job.url; linkDialog = true }) { Text("Change link") }
+                    // Item 47: let Android's own downloader try with the browser cookies.
+                    TextButton(onClick = {
+                        linkMsg = if (Downloads.systemFallback(ctx, job.url, job.name)) "Sent to Android's downloader. Check the notification." else "Android's downloader could not take this link."
+                    }) { Text("Try system downloader") }
+                }
+                if (linkMsg.isNotBlank()) Text(linkMsg, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
+    }
+    if (linkDialog) {
+        AlertDialog(
+            onDismissRequest = { linkDialog = false },
+            title = { Text("Change link") },
+            text = {
+                Column {
+                    Text("Paste a fresh link for the same file. Downloaded parts are kept when the size matches.", fontSize = 13.sp)
+                    OutlinedTextField(value = newLink, onValueChange = { newLink = it }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    linkDialog = false
+                    linkMsg = try { EngineHolder.engine?.updateURL(job.id, newLink.trim()); EngineHolder.engine?.resume(job.id); EngineHolder.refresh(); "Link updated." }
+                        catch (e: Exception) { e.message ?: "Could not change the link." }
+                }) { Text("Save and resume") }
+            },
+            dismissButton = { TextButton(onClick = { linkDialog = false }) { Text("Cancel") } },
+        )
     }
     if (confirm) {
         AlertDialog(
