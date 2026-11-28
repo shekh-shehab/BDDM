@@ -138,7 +138,7 @@ fun DetectedMediaSheet(
                             onPreview = { onPreview(MediaPick(g, g.options.getOrElse(choice[g.key] ?: 0) { g.best })) },
                             onAudio = { onDownload(listOf(MediaPick(g, g.best, audioOnly = true)), false) },
                             onCopy = { onCopy(g.options.getOrElse(choice[g.key] ?: 0) { g.best }.item.url) },
-                            onRemove = { onRemove(g.options.map { it.item.url }.distinct()); selected.remove(g.key) },
+                            onRemove = { onRemove(g.urls.ifEmpty { g.options.map { it.item.url } }.distinct()); selected.remove(g.key) },
                         )
                     }
                 }

@@ -124,12 +124,18 @@ object MediaEnricher {
                 val body = text(m.url, m.pageUrl)
                 if (HlsParser.isMaster(body)) {
                     val vars = HlsParser.parseMaster(body, m.url)
+                    val aux = HlsParser.parseAudioAndSubs(body, m.url)
                     val dur = vars.lastOrNull()?.let { v -> try { HlsParser.mediaDuration(text(v.url, m.pageUrl)) } catch (_: Exception) { 0.0 } } ?: 0.0
-                    MediaDetector.updateMeta(tabId, m.url) { it.copy(variants = vars, durationSec = if (dur > 0) dur else it.durationSec,
+                    MediaDetector.updateMeta(tabId, m.url) { it.copy(variants = vars + aux, durationSec = if (dur > 0) dur else it.durationSec,
                         height = vars.firstOrNull()?.height ?: it.height, probed = true) }
                 } else {
                     val dur = HlsParser.mediaDuration(body)
-                    MediaDetector.updateMeta(tabId, m.url) { it.copy(durationSec = if (dur > 0) dur else it.durationSec, probed = true) }
+                    val rendition = when {
+                        HlsParser.isSubtitlePlaylist(m.url, body) -> "subtitles"
+                        HlsParser.isAudioPlaylist(m.url, body) -> "audio"
+                        else -> ""
+                    }
+                    MediaDetector.updateMeta(tabId, m.url) { it.copy(durationSec = if (dur > 0) dur else it.durationSec, rendition = rendition, probed = true) }
                 }
             }
             MediaKind.DASH -> {

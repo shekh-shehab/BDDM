@@ -29,12 +29,16 @@ data class DetectedMedia(
     val mime: String = "",
     val variants: List<MediaVariant> = emptyList(),
     val probed: Boolean = false,
+    /** audio / subtitles for an HLS rendition playlist; empty for a real video. */
+    val rendition: String = "",
 ) {
     val host: String get() = MediaClassifier.hostOf(url) ?: ""
 }
 
 /** One quality of an HLS/DASH stream (or a same-named file in another resolution). */
-data class MediaVariant(val url: String, val width: Int, val height: Int, val bandwidth: Long, val sizeBytes: Long = 0)
+data class MediaVariant(val url: String, val width: Int, val height: Int, val bandwidth: Long, val sizeBytes: Long = 0, val role: String = "video") {
+    val isVideo: Boolean get() = role == "video" || role.isBlank()
+}
 
 /** Pure URL classification so it can be unit-tested without Android. */
 object MediaClassifier {

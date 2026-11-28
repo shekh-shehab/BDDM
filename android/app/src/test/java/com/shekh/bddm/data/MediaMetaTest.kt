@@ -109,4 +109,106 @@ class MediaMetaTest {
         assertEquals("1:02:03", MediaGrouping.formatDuration(3723.0))
         assertEquals("0:45", MediaGrouping.formatDuration(45.2))
     }
+
+    @Test
+    fun heightCanComeFromAFolderName() {
+        assertEquals(1080, MediaGrouping.heightFromName("https://cdn.test/v/1080/index.m3u8?token=1"))
+        assertEquals(720, MediaGrouping.heightFromName("https://cdn.test/v/720p/playlist.m3u8"))
+    }
+
+    @Test
+    fun masterAbsorbsVariantsEvenWhenQueryStringsDiffer() {
+        val m = dm("https://cdn.test/v/master.m3u8?exp=1", MediaKind.HLS).copy(
+            durationSec = 80.0,
+            variants = listOf(
+                MediaVariant("https://cdn.test/v/1080/index.m3u8", 1920, 1080, 5_000_000),
+                MediaVariant("https://cdn.test/v/720/index.m3u8", 1280, 720, 2_500_000),
+                MediaVariant("https://cdn.test/v/audio/eng.m3u8", 0, 0, 0, role = "audio"),
+                MediaVariant("https://cdn.test/v/subs/en.m3u8", 0, 0, 0, role = "subtitles"),
+            ),
+        )
+        val g = MediaGrouping.group(listOf(
+            m,
+            dm("https://cdn.test/v/1080/index.m3u8?hdnea=exp", MediaKind.HLS),
+            dm("https://cdn.test/v/720/index.m3u8?hdnea=exp", MediaKind.HLS),
+            dm("https://cdn.test/v/audio/eng.m3u8?hdnea=exp", MediaKind.HLS),
+            dm("https://cdn.test/v/subs/en.m3u8?hdnea=exp", MediaKind.HLS),
+        ), hideSmall = true)
+        assertEquals(1, g.size)
+        assertEquals(listOf("1080p", "720p"), g[0].options.map { it.label })
+        assertEquals(50_000_000L, g[0].best.sizeBytes)
+        assertTrue(g[0].options.none { it.label.equals("Audio", true) })
+    }
+
+    @Test
+    fun variantPlaylistsWithoutAMasterStillGroupAsOneVideo() {
+        val g = MediaGrouping.group(listOf(
+            dm("https://edge.test/id42/1080p/index.m3u8", MediaKind.HLS, title = "MegaPlay"),
+            dm("https://edge.test/id42/720p/index.m3u8", MediaKind.HLS, title = "MegaPlay"),
+            dm("https://edge.test/id42/480p/index.m3u8", MediaKind.HLS, title = "MegaPlay"),
+            dm("https://edge.test/id42/audio/eng.m3u8", MediaKind.HLS, title = "MegaPlay"),
+            dm("https://edge.test/id42/subs/en.m3u8", MediaKind.HLS, title = "MegaPlay"),
+        ), hideSmall = true)
+        assertEquals(1, g.size)
+        assertEquals(listOf("1080p", "720p", "480p"), g[0].options.map { it.label })
+        assertEquals(1080, g[0].best.height)
+        assertTrue(g[0].options.none { it.label == "Audio" || it.item.url.contains("/audio/") || it.item.url.contains("/subs/") })
+        assertEquals("MegaPlay", g[0].title)
+    }
+
+    @Test
+    fun twoDifferentHlsVideosStaySeparate() {
+        val g = MediaGrouping.group(listOf(
+            dm("https://edge.test/aaa/master.m3u8", MediaKind.HLS, title = "One"),
+            dm("https://edge.test/aaa/720p/index.m3u8", MediaKind.HLS, title = "One"),
+            dm("https://edge.test/bbb/master.m3u8", MediaKind.HLS, title = "Two"),
+            dm("https://edge.test/bbb/720p/index.m3u8", MediaKind.HLS, title = "Two"),
+        ), hideSmall = true)
+        assertEquals(2, g.size)
+        assertEquals(setOf("One", "Two"), g.map { it.title }.toSet())
+    }
+
+    @Test
+    fun extXMediaAudioAndSubsAreParsed() {
+        val master = """
+            #EXTM3U
+            #EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="English",DEFAULT=YES,URI="audio/eng.m3u8"
+            #EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="English",URI="subs/en.m3u8"
+            #EXT-X-MEDIA:TYPE=CLOSED-CAPTIONS,GROUP-ID="cc",NAME="CC"
+            #EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=854x480,AUDIO="audio",SUBTITLES="subs"
+            480/index.m3u8
+        """.trimIndent()
+        val aux = HlsParser.parseAudioAndSubs(master, "https://cdn.test/v/master.m3u8")
+        assertEquals(listOf("audio", "subtitles"), aux.map { it.role })
+        assertEquals("https://cdn.test/v/audio/eng.m3u8", aux[0].url)
+        assertEquals("https://cdn.test/v/subs/en.m3u8", aux[1].url)
+    }
+
+    @Test
+    fun familyKeyAndUrlIdentityIgnoreTokens() {
+        assertEquals(
+            HlsParser.urlIdentity("https://cdn.test/v/720/index.m3u8"),
+            HlsParser.urlIdentity("https://cdn.test/v/720/index.m3u8?hdnea=exp-1&sig=abc"),
+        )
+        assertEquals(
+            HlsParser.familyKey("https://cdn.test/show1/master.m3u8?t=1"),
+            HlsParser.familyKey("https://cdn.test/show1/1080p/index.m3u8?t=2"),
+        )
+        assertEquals(
+            HlsParser.familyKey("https://cdn.test/show1/audio/eng.m3u8"),
+            HlsParser.familyKey("https://cdn.test/show1/master.m3u8"),
+        )
+        assertNotEquals(
+            HlsParser.familyKey("https://cdn.test/show1/master.m3u8"),
+            HlsParser.familyKey("https://cdn.test/show2/master.m3u8"),
+        )
+    }
+
+    @Test
+    fun estimatedSizeUsesBandwidthTimesDuration() {
+        assertEquals(100_000_000L, MediaGrouping.estimatedSize(8_000_000, 100.0))
+        assertEquals(9L, MediaGrouping.estimatedSize(0, 100.0, 9))
+        assertEquals(0L, MediaGrouping.estimatedSize(0, 100.0))
+    }
+
 }
