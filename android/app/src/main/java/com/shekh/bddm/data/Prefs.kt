@@ -32,6 +32,13 @@ class Prefs(private val ctx: Context) {
         get() = sp.getBoolean("filterListAutoUpdate", true)
         set(v) { sp.edit().putBoolean("filterListAutoUpdate", v).apply() }
 
+    fun filterListOn(id: String): Boolean = sp.getBoolean("filterList_$id", true)
+    fun setFilterListOn(id: String, v: Boolean) { sp.edit().putBoolean("filterList_$id", v).apply() }
+
+    var searchSuggestions: Boolean
+        get() = sp.getBoolean("searchSuggestions", true)
+        set(v) { sp.edit().putBoolean("searchSuggestions", v).apply() }
+
     var autoCloseTabsDays: Int
         get() = sp.getInt("autoCloseTabsDays", 7)
         set(v) { sp.edit().putInt("autoCloseTabsDays", v).apply() }

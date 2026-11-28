@@ -40,6 +40,7 @@ object LaterStore {
                     .put("title", p.title)
                     .put("subtitle", p.subtitle)
                     .put("qualityId", p.qualityId)
+                    .put("referer", p.referer)
             )
         }
         sp?.edit()?.putString("items", a.toString())?.apply()
@@ -56,6 +57,7 @@ object LaterStore {
                     subtitle = o.optString("subtitle"),
                     kind = PendingDownload.Kind.Video,
                     qualityId = o.optString("qualityId", "best"),
+                    referer = o.optString("referer"),
                 ).takeIf { it.url.isNotBlank() }
             }
         } catch (_: Exception) { emptyList() }

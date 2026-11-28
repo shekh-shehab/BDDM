@@ -54,6 +54,8 @@ object OpenPolicy {
         return when {
             has64 && arm64.isNotBlank() -> arm64
             has32 && armv7.isNotBlank() -> armv7
+            // Releases are arm64-only now: a 32-bit-only phone must not be offered an APK it cannot install.
+            !has64 && arm64.isNotBlank() && armv7.isBlank() && (any.isBlank() || any == arm64) -> null
             any.isNotBlank() -> any
             arm64.isNotBlank() -> arm64
             armv7.isNotBlank() -> armv7

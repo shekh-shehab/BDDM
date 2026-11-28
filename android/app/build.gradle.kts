@@ -11,19 +11,11 @@ android {
         applicationId = "com.shekh.bddm"
         minSdk = 26
         targetSdk = 34
-        versionCode = 161
-        versionName = "1.6.1"
+        versionCode = 162
+        versionName = "1.6.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        // ABI splits below produce per-ABI APKs (item 98).
-    }
-
-    splits {
-        abi {
-            isEnable = true
-            reset()
-            include("arm64-v8a", "armeabi-v7a")
-            isUniversalApk = false
-        }
+        // arm64-v8a only (smaller APK; the updater only needs apkArm64).
+        ndk { abiFilters += "arm64-v8a" }
     }
 
     signingConfigs {

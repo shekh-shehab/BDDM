@@ -31,6 +31,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
+import kotlinx.coroutines.delay
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -115,8 +121,16 @@ fun BrowserRoot(act: BrowserActivity) {
     var idx by remember { mutableStateOf(store.currentIndex()) }
     val tab = tabs.getOrNull(idx) ?: tabs.first()
     var address by remember { mutableStateOf(tab.url) }
-    var detected by remember { mutableStateOf(listOf<PendingDownload>()) }
-    var iframeUrls by remember { mutableStateOf(listOf<String>()) }
+    var field by remember { mutableStateOf(TextFieldValue(tab.url)) }
+    var addrFocused by remember { mutableStateOf(false) }
+    var userTyped by remember { mutableStateOf(false) }
+    var suggestions by remember { mutableStateOf(listOf<Suggestion>()) }
+    var histSnap by remember { mutableStateOf(listOf<HistoryEntry>()) }
+    var markSnap by remember { mutableStateOf(listOf<Bookmark>()) }
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    val detectedAll by MediaDetector.all.collectAsState()
+    val detected = detectedAll[tab.id].orEmpty()
     var probing by remember { mutableStateOf(false) }
     var pendingOpen by remember { mutableStateOf<OpenRequest?>(null) }
     var showDetected by remember { mutableStateOf(false) }
@@ -146,6 +160,23 @@ fun BrowserRoot(act: BrowserActivity) {
         onDispose { act.hideSwitcher = null }
     }
 
+    // The field follows the page address unless the user is editing it.
+    LaunchedEffect(address, addrFocused) {
+        if (!addrFocused && field.text != address) field = TextFieldValue(address)
+    }
+    // Item 106: suggestions while typing (local at once, Google after a short pause).
+    LaunchedEffect(field.text, addrFocused, userTyped) {
+        val q = field.text.trim()
+        if (!addrFocused || !userTyped || q.isEmpty()) { suggestions = emptyList(); return@LaunchedEffect }
+        val loc = Suggestions.local(q, histSnap, markSnap)
+        suggestions = Suggestions.merge(q, loc, emptyList())
+        if (prefs.searchSuggestions) {
+            delay(150)
+            val remote = withContext(Dispatchers.IO) { Suggestions.fetchGoogle(q) }
+            suggestions = Suggestions.merge(q, loc, remote)
+        }
+    }
+
     fun load(raw: String) {
         val text = raw.trim()
         val url = when {
@@ -155,6 +186,11 @@ fun BrowserRoot(act: BrowserActivity) {
             else -> prefs.searchEngine + android.net.Uri.encode(text)
         }
         address = url
+        field = TextFieldValue(url)
+        userTyped = false
+        suggestions = emptyList()
+        focusManager.clearFocus()
+        keyboard?.hide()
         tab.url = url
         store.touch(tab)
         act.trustedLoad = true
@@ -195,14 +231,44 @@ fun BrowserRoot(act: BrowserActivity) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = { act.webView?.goBack() }) { Icon(Icons.Default.ArrowBack, "Back") }
                     OutlinedTextField(
-                        value = address,
-                        onValueChange = { address = it },
-                        modifier = Modifier.weight(1f).height(52.dp),
+                        value = field,
+                        onValueChange = {
+                            if (it.text != field.text) userTyped = true
+                            field = it
+                            address = it.text
+                        },
+                        modifier = Modifier.weight(1f).height(52.dp).onFocusChanged { st ->
+                            val was = addrFocused
+                            addrFocused = st.isFocused
+                            if (!st.isFocused && was) {
+                                // Left the bar without pressing Go: show the real address again.
+                                userTyped = false
+                                address = tab.url
+                                field = TextFieldValue(tab.url)
+                            }
+                            if (st.isFocused && !was) {
+                                userTyped = false
+                                // Item 105: tapping the bar selects the whole URL (Chrome-style).
+                                // The tap itself places the cursor after focus arrives, so select again shortly after.
+                                scope.launch {
+                                    withContext(Dispatchers.IO) {
+                                        histSnap = store.history()
+                                        markSnap = store.bookmarks()
+                                    }
+                                }
+                                scope.launch {
+                                    for (d in longArrayOf(30, 120, 300)) {
+                                        delay(d)
+                                        if (addrFocused && !userTyped) field = field.copy(selection = TextRange(0, field.text.length))
+                                    }
+                                }
+                            }
+                        },
                         singleLine = true,
                         textStyle = LocalTextStyle.current.copy(fontSize = 13.sp),
                         shape = RoundedCornerShape(24.dp),
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
-                        keyboardActions = KeyboardActions(onGo = { load(address) }),
+                        keyboardActions = KeyboardActions(onGo = { load(field.text) }),
                     )
                     Box {
                         IconButton(onClick = { showShieldMenu = true }) {
@@ -280,21 +346,41 @@ fun BrowserRoot(act: BrowserActivity) {
                                 settings.userAgentString = FilterEngine.chromeLikeUa(settings.userAgentString)
                                 setLayerType(View.LAYER_TYPE_HARDWARE, null)
                                 cookie(tab.incognito)
-                                addJavascriptInterface(DetectBridge { list -> detected = list; iframeUrls = list.filter { it.subtitle == "iframe" }.map { it.url } }, "BDDM")
+                                val tabId = tab.id
+                                addJavascriptInterface(
+                                    DetectBridge(tabId, { tab.url }, { tab.title }, { u -> ad.isAdUrl(u, AdBlocker.hostOf(tab.url) ?: "") }),
+                                    MediaHooks.BRIDGE_NAME,
+                                )
+                                val docStart = MediaHooks.installDocumentStart(this)
                                 webViewClient = object : WebViewClient() {
                                     override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
                                         val pageHost = AdBlocker.hostOf(tab.url) ?: request.url.host ?: ""
-                                        return ad.intercept(request, pageHost)
+                                        val blockedResp = ad.intercept(request, pageHost)
+                                        if (blockedResp != null) return blockedResp
+                                        try { recordRequest(tabId, request, pageHost, ad, tab.url) } catch (_: Throwable) {}
+                                        return null
+                                    }
+                                    override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
+                                        // Single-page apps change the address without loading a new document.
+                                        if (url == null || !url.startsWith("http") || isReload) return
+                                        if (url.substringBefore('#') == tab.url.substringBefore('#')) return
+                                        tab.url = url
+                                        address = url
+                                        MediaDetector.clear(tabId)
+                                        view?.evaluateJavascript("window.__bddmReset && window.__bddmReset();", null)
+                                        if (YtDlp.isSitePage(url) && MediaClassifier.isWatchPage(url)) {
+                                            MediaDetector.add(tabId, DetectedMedia(url, MediaKind.PAGE, MediaClassifier.titleFor(url, view?.title ?: ""), url, "spa"))
+                                        }
+                                        view?.postDelayed({ MediaHooks.rescan(view) }, 1200)
                                     }
                                     override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                                         ad.resetPageCount()
                                         blocked = 0
-                                        detected = emptyList()
-                                        iframeUrls = emptyList()
                                         if (url != null && url.startsWith("http")) {
                                             address = url
                                             tab.url = url
                                         }
+                                        if (!docStart) MediaHooks.inject(view)
                                     }
                                     override fun onPageFinished(view: WebView?, url: String?) {
                                         act.trustedLoad = false
@@ -307,7 +393,9 @@ fun BrowserRoot(act: BrowserActivity) {
                                             store.touch(tab)
                                             if (!tab.incognito) store.addHistory(tab.title, url)
                                         }
-                                        view?.evaluateJavascript(DETECT_JS, null)
+                                        MediaHooks.inject(view)
+                                        MediaHooks.rescan(view)
+                                        MediaDetector.updateTitle(tabId, tab.title)
                                         view?.postDelayed({
                                             val bmp = view.let { TabThumbs.capture(it) }
                                             if (bmp != null) TabThumbs.saveThumb(act, tab.id, bmp)
@@ -356,7 +444,7 @@ fun BrowserRoot(act: BrowserActivity) {
                                         return true
                                     }
                                     override fun onReceivedTitle(view: WebView?, title: String?) {
-                                        if (!title.isNullOrBlank()) tab.title = title
+                                        if (!title.isNullOrBlank()) { tab.title = title; MediaDetector.updateTitle(tabId, title) }
                                     }
                                     override fun onReceivedIcon(view: WebView?, icon: Bitmap?) {
                                         if (icon != null) TabThumbs.saveFavicon(act, tab.id, icon)
@@ -383,16 +471,26 @@ fun BrowserRoot(act: BrowserActivity) {
                             }
                         }, modifier = Modifier.fillMaxSize(), update = { wv -> act.webView = wv })
                     }
+                    if (suggestions.isNotEmpty() && addrFocused) {
+                        SuggestionList(
+                            suggestions,
+                            modifier = Modifier.align(Alignment.TopStart).fillMaxWidth().padding(horizontal = 8.dp),
+                            onPick = { s -> load(s.url ?: s.text) },
+                        )
+                    }
                     FloatingActionButton(
                         onClick = {
                             if (probing) return@FloatingActionButton
+                            MediaHooks.rescan(act.webView)
                             if (detected.isNotEmpty()) {
                                 showDetected = true
                             } else {
                                 probing = true
                                 scope.launch {
-                                    findVideosOnPage(act.webView, tab.url, tab.title, iframeUrls)
+                                    val found = findVideosOnPage(tab.url, tab.title)
                                     probing = false
+                                    if (!found) snack = if (!tab.url.startsWith("http")) "Open a page with a video first."
+                                        else "No video found yet. Press play on the video, then tap again."
                                 }
                             }
                         },
@@ -418,19 +516,16 @@ fun BrowserRoot(act: BrowserActivity) {
         if (showDetected) {
             DetectedSheet(detected, onDismiss = { showDetected = false }, onDownload = { item ->
                 showDetected = false
-                scope.launch {
-                    var ready = item
-                    if (item.kind == PendingDownload.Kind.Video && item.formats.isEmpty() && YtDlp.ready) {
-                        ready = try {
-                            val info = withContext(Dispatchers.IO) { YtDlp.probe(item.url) }
-                            item.copy(title = info.title, formats = info.formats, subtitle = info.site + if (info.duration.isNotBlank()) " · ${info.duration}" else "")
-                        } catch (_: Throwable) { item }
-                    }
-                    PendingQueue.add(ready)
-                }
+                val p = item.toPending()
+                PendingQueue.add(p)
+                Downloads.enrichAsync(scope, p.url, p.referer)
             }, onDownloadAll = {
                 showDetected = false
-                detected.forEach { PendingQueue.add(it) }
+                detected.forEach {
+                    val p = it.toPending()
+                    PendingQueue.add(p)
+                    Downloads.enrichAsync(scope, p.url, p.referer)
+                }
             })
         }
         if (sheetOpen && pending.isNotEmpty()) {
@@ -576,25 +671,90 @@ fun BrowserRoot(act: BrowserActivity) {
 }
 
 @Composable
-private fun DetectedSheet(items: List<PendingDownload>, onDismiss: () -> Unit, onDownload: (PendingDownload) -> Unit, onDownloadAll: () -> Unit) {
+private fun SuggestionList(items: List<Suggestion>, modifier: Modifier, onPick: (Suggestion) -> Unit) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(16.dp),
+        tonalElevation = 6.dp,
+        shadowElevation = 8.dp,
+        color = MaterialTheme.colorScheme.surface,
+    ) {
+        LazyColumn(Modifier.heightIn(max = 360.dp)) {
+            items(items.size) { i ->
+                val s = items[i]
+                Row(
+                    Modifier.fillMaxWidth().clickable { onPick(s) }.padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        when (s.kind) {
+                            Suggestion.Kind.BOOKMARK -> Icons.Default.Star
+                            Suggestion.Kind.HISTORY -> Icons.Default.History
+                            Suggestion.Kind.SEARCH -> Icons.Default.Search
+                        },
+                        null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(s.text, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 14.sp)
+                        if (s.subtitle.isNotBlank()) {
+                            Text(s.subtitle, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DetectedSheet(items: List<DetectedMedia>, onDismiss: () -> Unit, onDownload: (DetectedMedia) -> Unit, onDownloadAll: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Detected on this page") },
+        title = { Text("Found on this page") },
         text = {
             LazyColumn {
                 items(items.size) { i ->
-                    val p = items[i]
+                    val m = items[i]
                     ListItem(
-                        headlineContent = { Text(p.title, maxLines = 1) },
-                        supportingContent = { Text(p.subtitle.ifBlank { p.url }, maxLines = 2, fontSize = 12.sp) },
-                        trailingContent = { TextButton(onClick = { onDownload(p) }) { Text("Download") } },
+                        headlineContent = { Text(m.title.ifBlank { m.url }, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                        supportingContent = { Text(m.kind.label + if (m.host.isNotBlank()) " · " + m.host else "", maxLines = 1, fontSize = 12.sp) },
+                        trailingContent = { TextButton(onClick = { onDownload(m) }) { Text("Download") } },
                     )
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onDownloadAll) { Text("Add all") } },
+        confirmButton = { if (items.size > 1) TextButton(onClick = onDownloadAll) { Text("Add all") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Close") } },
     )
+}
+
+private fun DetectedMedia.toPending() = PendingDownload(
+    url = url,
+    title = title.ifBlank { url },
+    subtitle = kind.label + if (host.isNotBlank()) " · $host" else "",
+    kind = PendingDownload.Kind.Video,
+    referer = pageUrl,
+)
+
+/** Network-level capture: sees every request from every frame, including players that never touch the DOM. */
+private fun recordRequest(tabId: String, request: WebResourceRequest, pageHost: String, ad: AdBlocker, pageUrl: String) {
+    val u = request.url.toString()
+    if (!u.startsWith("http")) return
+    if (request.isForMainFrame) {
+        MediaDetector.clear(tabId)
+        if (YtDlp.isSitePage(u) && MediaClassifier.isWatchPage(u)) {
+            MediaDetector.add(tabId, DetectedMedia(u, MediaKind.PAGE, MediaClassifier.titleFor(u, ""), u, "page"))
+        }
+        MediaDetector.offer(tabId, u, u, "", "network")
+        return
+    }
+    if (!request.method.equals("GET", true)) return
+    if (MediaClassifier.classify(u) == null) return
+    if (ad.isAdUrl(u, pageHost)) return
+    val page = request.requestHeaders?.get("Referer")?.takeIf { it.startsWith("http") } ?: pageUrl
+    MediaDetector.offer(tabId, u, page, "", "network")
 }
 
 private fun WebView.cookie(incognito: Boolean) {
@@ -615,129 +775,22 @@ private fun captureCurrent(act: BrowserActivity, tabId: String) {
     TabThumbs.saveThumb(act, tabId, bmp)
 }
 
-private suspend fun findVideosOnPage(wv: WebView?, pageUrl: String, pageTitle: String, knownIframes: List<String>) {
-    val urls = LinkedHashSet<String>()
-    if (pageUrl.startsWith("http")) urls.add(pageUrl)
-    knownIframes.filter { it.startsWith("http") }.forEach { urls.add(it) }
-    val fromJs = kotlinx.coroutines.suspendCancellableCoroutine<List<String>> { cont ->
-        val view = wv
-        if (view == null) { cont.resume(emptyList()); return@suspendCancellableCoroutine }
-        view.post {
-            view.evaluateJavascript(IFRAME_JS) { raw ->
-                val list = parseJsStringList(raw)
-                if (cont.isActive) cont.resume(list)
-            }
-        }
-    }
-    fromJs.filter { it.startsWith("http") }.forEach { urls.add(it) }
-    var any = false
-    if (!YtDlp.ready) {
-        urls.forEach { u ->
-            PendingQueue.add(PendingDownload(u, pageTitle.ifBlank { u }, "Page", kind = PendingDownload.Kind.Video))
-            any = true
-        }
-        return
-    }
-    for (u in urls) {
-        try {
-            val info = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { YtDlp.probe(u) }
-            if (info.formats.isNotEmpty() || info.title.isNotBlank()) {
-                PendingQueue.add(
-                    PendingDownload(
-                        url = u,
-                        title = info.title.ifBlank { pageTitle }.ifBlank { u },
-                        subtitle = info.site + if (info.duration.isNotBlank()) " · ${info.duration}" else "",
-                        kind = PendingDownload.Kind.Video,
-                        formats = info.formats,
-                    )
-                )
-                any = true
-            }
-        } catch (_: Throwable) {}
-    }
-    if (!any && pageUrl.startsWith("http")) {
-        PendingQueue.add(PendingDownload(pageUrl, pageTitle.ifBlank { pageUrl }, "Page", kind = PendingDownload.Kind.Video))
-    }
-}
-
-private fun parseJsStringList(raw: String?): List<String> {
-    if (raw.isNullOrBlank() || raw == "null") return emptyList()
-    var s = raw.trim()
-    if (s.length >= 2 && s.first() == '"' && s.last() == '"') {
-        s = org.json.JSONTokener(s).nextValue()?.toString() ?: s
-        // If the WebView already returned a JSON array literal, nextValue yields the array.
-        // Fall through to JSONArray below on the original or decoded form.
-    }
-    val json = if (s.startsWith("[")) s else raw.trim().trim('"')
+/** Last resort when nothing was captured: ask yt-dlp whether the page itself holds a video. */
+private suspend fun findVideosOnPage(pageUrl: String, pageTitle: String): Boolean {
+    if (!pageUrl.startsWith("http")) return false
     return try {
-        val a = org.json.JSONArray(json)
-        (0 until a.length()).mapNotNull { i -> a.optString(i).takeIf { u -> u.isNotBlank() } }
-    } catch (_: Exception) {
-        try {
-            val a = org.json.JSONArray(raw)
-            (0 until a.length()).mapNotNull { i -> a.optString(i).takeIf { u -> u.isNotBlank() } }
-        } catch (_: Exception) { emptyList() }
-    }
+        val info = withContext(Dispatchers.IO) { YtDlp.probe(pageUrl, referer = pageUrl) }
+        if (info.formats.isEmpty() && info.title.isBlank()) return false
+        PendingQueue.add(
+            PendingDownload(
+                url = pageUrl,
+                title = info.title.ifBlank { pageTitle }.ifBlank { pageUrl },
+                subtitle = info.site + if (info.duration.isNotBlank()) " · ${info.duration}" else "",
+                kind = PendingDownload.Kind.Video,
+                formats = info.formats,
+                referer = pageUrl,
+            )
+        )
+        true
+    } catch (_: Throwable) { false }
 }
-
-class DetectBridge(val onList: (List<PendingDownload>) -> Unit) {
-    @android.webkit.JavascriptInterface
-    fun found(json: String) {
-        try {
-            val a = JSONArray(json)
-            val list = ArrayList<PendingDownload>()
-            for (i in 0 until a.length()) {
-                val o = a.getJSONObject(i)
-                val url = o.optString("url")
-                if (url.isBlank()) continue
-                val title = o.optString("title").ifBlank { url.substringAfterLast('/') }
-                val kind = if (YtDlp.looksLikeMedia(url) || YtDlp.isHlsOrDash(url)) PendingDownload.Kind.Video else PendingDownload.Kind.File
-                list.add(PendingDownload(url, title, o.optString("type"), kind = kind))
-            }
-            android.os.Handler(android.os.Looper.getMainLooper()).post { onList(list) }
-        } catch (_: Exception) {}
-    }
-}
-
-private const val DETECT_JS = """
-(function(){
-  try {
-    var out = [];
-    var seen = {};
-    function add(u, title, type){
-      if(!u || seen[u]) return;
-      if(u.indexOf('blob:')===0 || u.indexOf('data:')===0) return;
-      seen[u]=1;
-      out.push({url:u, title:title||document.title||'', type:type||''});
-    }
-    document.querySelectorAll('video,audio,source').forEach(function(el){
-      add(el.currentSrc||el.src, document.title, (el.tagName||'').toLowerCase());
-      if(el.querySelectorAll) el.querySelectorAll('source').forEach(function(s){ add(s.src, document.title, s.type); });
-    });
-    if (window.performance && performance.getEntriesByType) {
-      performance.getEntriesByType('resource').forEach(function(r){
-        var n=(r.name||'').toLowerCase();
-        if (/\.(mp4|webm|mkv|m3u8|mpd|m4a|mp3)(\?|$)/.test(n)) add(r.name, document.title, 'resource');
-      });
-    }
-    document.querySelectorAll('a[href]').forEach(function(a){
-      var h=(a.href||'').toLowerCase();
-      if (/\.(mp4|webm|mkv|m3u8|mpd)(\?|$)/.test(h)) add(a.href, a.textContent||document.title, 'link');
-    });
-    document.querySelectorAll('iframe[src]').forEach(function(f){
-      add(f.src, document.title, 'iframe');
-    });
-    if (window.BDDM && BDDM.found) BDDM.found(JSON.stringify(out.slice(0, 25)));
-  } catch(e){}
-})();
-"""
-
-private const val IFRAME_JS = """
-(function(){
-  try {
-    var a=[];
-    document.querySelectorAll('iframe[src]').forEach(function(f){ if(f.src) a.push(f.src); });
-    return JSON.stringify(a.slice(0, 20));
-  } catch(e){ return "[]"; }
-})();
-"""

@@ -8,9 +8,8 @@ import com.shekh.bddm.data.AdBlocker
 import com.shekh.bddm.data.EngineHolder
 import com.shekh.bddm.data.Prefs
 import com.shekh.bddm.data.LaterStore
+import com.shekh.bddm.data.VideoJobs
 import com.shekh.bddm.data.YtDlp
-import com.yausername.ffmpeg.FFmpeg
-import com.yausername.youtubedl_android.YoutubeDL
 import java.io.File
 
 class BDDMApp : Application() {
@@ -18,6 +17,11 @@ class BDDMApp : Application() {
         private set
     lateinit var adBlocker: AdBlocker
         private set
+
+    /** The installed app's real version (the Go engine's built-in constant is not rebuilt for every release). */
+    val versionName: String by lazy {
+        try { packageManager.getPackageInfo(packageName, 0).versionName ?: "" } catch (_: Exception) { "" }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -30,14 +34,8 @@ class BDDMApp : Application() {
         LaterStore.init(this)
         adBlocker = AdBlocker(this, prefs)
         adBlocker.loadAsync()
-        try {
-            YoutubeDL.getInstance().init(this)
-            FFmpeg.getInstance().init(this)
-            YtDlp.ready = true
-        } catch (t: Throwable) {
-            YtDlp.ready = false
-            YtDlp.initError = t.message
-        }
+        VideoJobs.init(this)
+        YtDlp.initAsync(this)
     }
 
     private fun createNotificationChannel() {

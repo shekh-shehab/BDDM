@@ -18,9 +18,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.shekh.bddm.BDDMApp
-import com.shekh.bddm.core.mobile.Mobile
 import com.shekh.bddm.data.EngineHolder
+import com.shekh.bddm.data.AdBlocker
 import com.shekh.bddm.data.OpenPolicy
+import com.shekh.bddm.data.YtDlp
 import org.json.JSONObject
 
 @Composable
@@ -118,10 +119,21 @@ fun SettingsScreen() {
                 }
                 Toggle("Block popups", "Blocks windows that open without a tap. A tap that opens another site still asks first.", popups) { popups = it; prefs.blockPopups = it; pushEngine("blockPopups" to it) }
                 Toggle("Block trackers", null, trackers) { trackers = it; prefs.blockTrackers = it; pushEngine("blockTrackers" to it) }
-                Toggle("Update filter lists automatically", "Daily updates (EasyList, EasyPrivacy).", autoLists) {
+                Toggle("Update filter lists automatically", "Daily updates of the lists below (same lists uBlock Origin uses).", autoLists) {
                     autoLists = it; prefs.filterListAutoUpdate = it; pushEngine("filterListAutoUpdate" to it)
                     if (it) BDDMApp.instance.adBlocker.forceUpdate()
                 }
+                Text("Filter lists", fontWeight = FontWeight.Medium, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+                AdBlocker.LISTS.forEach { l ->
+                    var on by remember { mutableStateOf(prefs.filterListOn(l.id)) }
+                    Toggle(l.name, null, on) {
+                        on = it; prefs.setFilterListOn(l.id, it)
+                        BDDMApp.instance.adBlocker.let { ab -> ab.reloadAsync(); if (it) ab.forceUpdate() }
+                    }
+                }
+                Text(BDDMApp.instance.adBlocker.status, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Network rules only. Page-hiding (cosmetic) and scriptlet rules need a browser extension and are skipped.",
+                    fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 TextButton(onClick = { BDDMApp.instance.adBlocker.forceUpdate(); updateMsg = "Updating filter lists…" }) {
                     Text("Update lists now")
                 }
@@ -131,6 +143,11 @@ fun SettingsScreen() {
         Card(shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp)) {
                 Text("Browser", fontWeight = FontWeight.SemiBold)
+                var sugg by remember { mutableStateOf(prefs.searchSuggestions) }
+                Toggle("Address bar suggestions", "Shows history, bookmarks and Google search suggestions while you type.", sugg) {
+                    sugg = it; prefs.searchSuggestions = it
+                }
+                Text("Video engine: " + YtDlp.statusText(), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text("Close unused tabs after this many days (0 = never). Vivaldi-style tab strip keeps recent tabs.",
                     fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 OutlinedTextField(value = closeDays, onValueChange = {
@@ -166,7 +183,7 @@ fun SettingsScreen() {
         Card(shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp)) {
                 Text("Updates", fontWeight = FontWeight.SemiBold)
-                Text("This app is BDDM ${Mobile.AppVersion}. Android updates use the android-v tags, not the PC Latest release.",
+                Text("This app is BDDM ${BDDMApp.instance.versionName}. Android updates use the android-v tags, not the PC Latest release.",
                     fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Toggle("Check for updates automatically", null, autoUpd) {
                     autoUpd = it; prefs.checkUpdates = it; pushEngine("checkUpdates" to it)
@@ -176,7 +193,7 @@ fun SettingsScreen() {
                         scope.launch {
                             checking = true
                             val raw = withContext(Dispatchers.IO) {
-                                EngineHolder.engine?.checkUpdate(Mobile.AppVersion) ?: "{}"
+                                EngineHolder.engine?.checkUpdate(BDDMApp.instance.versionName) ?: "{}"
                             }
                             val o = try { JSONObject(raw) } catch (_: Exception) { JSONObject() }
                             val newer = o.optBoolean("newer")
@@ -203,7 +220,7 @@ fun SettingsScreen() {
             }
         }
         Spacer(Modifier.height(24.dp))
-        Text("BDDM ${Mobile.AppVersion}  ·  shekh-shehab/BDDM", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("BDDM ${BDDMApp.instance.versionName}  ·  shekh-shehab/BDDM", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(48.dp))
     }
 }

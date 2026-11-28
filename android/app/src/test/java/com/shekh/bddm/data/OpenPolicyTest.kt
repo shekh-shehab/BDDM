@@ -38,4 +38,11 @@ class OpenPolicyTest {
         val o = JSONObject().put("apk", "https://x/BDDM-Android-1.6.0.apk")
         assertEquals("https://x/BDDM-Android-1.6.0.apk", OpenPolicy.pickApkUrl(o, listOf("arm64-v8a")))
     }
+
+    @Test
+    fun arm64OnlyReleaseWorksOnArm64AndIsNotOfferedTo32BitPhones() {
+        val o = JSONObject().put("apkArm64", "https://x/BDDM-Android-1.6.2-arm64-v8a.apk").put("apk", "https://x/BDDM-Android-1.6.2-arm64-v8a.apk")
+        assertEquals("https://x/BDDM-Android-1.6.2-arm64-v8a.apk", OpenPolicy.pickApkUrl(o, listOf("arm64-v8a", "armeabi-v7a", "armeabi")))
+        assertNull(OpenPolicy.pickApkUrl(o, listOf("armeabi-v7a", "armeabi")))
+    }
 }

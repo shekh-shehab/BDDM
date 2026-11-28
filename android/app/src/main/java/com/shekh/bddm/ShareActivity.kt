@@ -27,19 +27,7 @@ class ShareActivity : ComponentActivity() {
         val kind = if (YtDlp.isSitePage(url) || YtDlp.looksLikeMedia(url) || YtDlp.isHlsOrDash(url))
             PendingDownload.Kind.Video else PendingDownload.Kind.File
         PendingQueue.add(PendingDownload(url = url, title = url, subtitle = url, kind = kind))
-        if (kind == PendingDownload.Kind.Video && YtDlp.ready && YtDlp.isSitePage(url)) {
-            lifecycleScope.launch {
-                try {
-                    val info = withContext(Dispatchers.IO) { YtDlp.probe(url) }
-                    val cur = PendingQueue.items.value.toMutableList()
-                    val i = cur.indexOfFirst { it.url == url }
-                    if (i >= 0) {
-                        cur[i] = cur[i].copy(title = info.title, formats = info.formats, subtitle = info.site)
-                        PendingQueue.update(cur)
-                    }
-                } catch (_: Throwable) {}
-            }
-        }
+        if (kind == PendingDownload.Kind.Video) Downloads.enrichAsync(lifecycleScope, url)
         setContent {
             val prefs = BDDMApp.instance.prefs
             val items by PendingQueue.items.collectAsState()

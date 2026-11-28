@@ -1,10 +1,14 @@
 package com.shekh.bddm.data
 
+import android.content.Context
+import com.yausername.ffmpeg.FFmpeg
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 data class VideoFormat(
     val id: String,
@@ -27,6 +31,48 @@ data class VideoInfo(
 object YtDlp {
     @Volatile var ready = false
     @Volatile var initError: String? = null
+    @Volatile var version: String = ""
+    private val initDone = CountDownLatch(1)
+
+    /** Extracts yt-dlp/ffmpeg off the main thread, then refreshes yt-dlp at most twice a day. */
+    fun initAsync(app: Context) {
+        Thread {
+            try {
+                YoutubeDL.getInstance().init(app)
+                FFmpeg.getInstance().init(app)
+                ready = true
+            } catch (t: Throwable) {
+                ready = false
+                initError = t.message ?: t.javaClass.simpleName
+            } finally {
+                initDone.countDown()
+            }
+            if (ready) {
+                try { version = YoutubeDL.version(app) ?: "" } catch (_: Throwable) {}
+                try {
+                    val sp = app.getSharedPreferences("bddm_ytdlp", Context.MODE_PRIVATE)
+                    val last = sp.getLong("updated", 0L)
+                    if (System.currentTimeMillis() - last > 12 * 3600 * 1000L) {
+                        YoutubeDL.getInstance().updateYoutubeDL(app, YoutubeDL.UpdateChannel.STABLE)
+                        sp.edit().putLong("updated", System.currentTimeMillis()).apply()
+                        version = YoutubeDL.version(app) ?: version
+                    }
+                } catch (_: Throwable) { /* offline or blocked: keep the bundled build */ }
+            }
+        }.start()
+    }
+
+    /** Blocks (off the main thread!) until init finished or the timeout passes. */
+    fun await(timeoutMs: Long = 25000): Boolean {
+        try { initDone.await(timeoutMs, TimeUnit.MILLISECONDS) } catch (_: InterruptedException) {}
+        return ready
+    }
+
+    fun statusText(): String = when {
+        ready -> "Ready" + if (version.isNotBlank()) " (yt-dlp $version)" else ""
+        initError != null -> "Not available: $initError"
+        else -> "Starting…"
+    }
 
     private val siteHosts = listOf(
         "youtube.com", "youtu.be", "tiktok.com", "instagram.com", "facebook.com",
@@ -50,9 +96,19 @@ object YtDlp {
         return u.endsWith(".m3u8") || u.endsWith(".mpd") || u.contains(".m3u8") || u.contains(".mpd")
     }
 
-    fun probe(url: String): VideoInfo {
-        if (!ready) throw IllegalStateException(initError ?: "yt-dlp is not ready")
+    private fun applyHeaders(req: YoutubeDLRequest, url: String, referer: String, userAgent: String, cookie: String) {
+        if (referer.isNotBlank()) req.addOption("--referer", referer)
+        // Site extractors (YouTube, TikTok, ...) manage their own headers; only help generic/embedded URLs.
+        if (!isSitePage(url)) {
+            if (userAgent.isNotBlank()) req.addOption("--user-agent", userAgent)
+            if (cookie.isNotBlank()) req.addOption("--add-header", "Cookie:$cookie")
+        }
+    }
+
+    fun probe(url: String, referer: String = "", userAgent: String = "", cookie: String = ""): VideoInfo {
+        if (!await()) throw IllegalStateException(initError ?: "yt-dlp is not ready")
         val req = YoutubeDLRequest(url)
+        applyHeaders(req, url, referer, userAgent, cookie)
         req.addOption("-J")
         req.addOption("--no-playlist")
         req.addOption("--no-warnings")
@@ -100,16 +156,25 @@ object YtDlp {
         return listOf(best) + unique.take(12)
     }
 
+    fun cancel(processId: String) {
+        try { YoutubeDL.getInstance().destroyProcessById(processId) } catch (_: Throwable) {}
+    }
+
     fun download(
         url: String,
         formatId: String,
         dir: File,
+        processId: String? = null,
+        referer: String = "",
+        userAgent: String = "",
+        cookie: String = "",
         onProgress: (percent: Float, eta: Long, line: String) -> Unit,
     ): File {
-        if (!ready) throw IllegalStateException(initError ?: "yt-dlp is not ready")
+        if (!await()) throw IllegalStateException(initError ?: "yt-dlp is not ready")
         dir.mkdirs()
         val tmpl = File(dir, "%(title).80B [%(id)s].%(ext)s").absolutePath
         val req = YoutubeDLRequest(url)
+        applyHeaders(req, url, referer, userAgent, cookie)
         req.addOption("-o", tmpl)
         req.addOption("--no-playlist")
         req.addOption("--no-mtime")
@@ -125,7 +190,7 @@ object YtDlp {
             req.addOption("-f", "$formatId+bestaudio/ba/$formatId/b")
         }
         var lastFile: File? = null
-        YoutubeDL.getInstance().execute(req, null) { progress, etaInSeconds, line ->
+        YoutubeDL.getInstance().execute(req, processId) { progress, etaInSeconds, line ->
             if (line != null) {
                 val dest = Regex("Destination: (.+)").find(line)?.groupValues?.getOrNull(1)
                 if (dest != null) lastFile = File(dest.trim())

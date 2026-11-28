@@ -16,6 +16,10 @@ data class PendingDownload(
     val formats: List<VideoFormat> = emptyList(),
     var qualityId: String = "best",
     var selected: Boolean = true,
+    /** Page the media came from; sent as the Referer so protected streams still download. */
+    val referer: String = "",
+    /** True while yt-dlp is still reading the available qualities. */
+    val loading: Boolean = false,
 ) {
     enum class Kind { File, Video }
 }

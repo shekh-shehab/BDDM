@@ -48,6 +48,19 @@ fun DownloadListScreen(
         }
     }
     val later by LaterStore.items.collectAsState()
+    val allVideo by VideoJobs.jobs.collectAsState()
+    val videos = remember(allVideo, filter, query) {
+        allVideo.filter { v ->
+            val q = query.isBlank() || v.title.contains(query, true) || v.url.contains(query, true)
+            val f = when (filter) {
+                "Active" -> v.active
+                "Completed" -> v.status == "Done"
+                "Error" -> v.status == "Error" || v.status == "Cancelled"
+                else -> true
+            }
+            q && f
+        }
+    }
     val ctx = androidx.compose.ui.platform.LocalContext.current
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Row(
@@ -73,10 +86,10 @@ fun DownloadListScreen(
         Spacer(Modifier.height(8.dp))
         Row(Modifier.padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             val counts = mapOf(
-                "All" to snap.jobs.size,
-                "Active" to snap.jobs.count { it.status == "Downloading" || it.status == "Queued" },
-                "Completed" to snap.done,
-                "Error" to snap.error,
+                "All" to snap.jobs.size + allVideo.size,
+                "Active" to snap.jobs.count { it.status == "Downloading" || it.status == "Queued" } + allVideo.count { it.active },
+                "Completed" to snap.done + allVideo.count { it.status == "Done" },
+                "Error" to snap.error + allVideo.count { it.status == "Error" || it.status == "Cancelled" },
             )
             counts.forEach { (name, n) ->
                 FilterChip(
@@ -94,7 +107,7 @@ fun DownloadListScreen(
         }
         Spacer(Modifier.height(8.dp))
         Box(Modifier.weight(1f)) {
-            if (filtered.isEmpty() && later.isEmpty()) {
+            if (filtered.isEmpty() && later.isEmpty() && videos.isEmpty()) {
                 Text(
                     "No downloads yet.\nPaste a link or share one to BDDM.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -106,6 +119,23 @@ fun DownloadListScreen(
                         items(later, key = { "later-"+it.url }) { item ->
                             LaterCard(item, onStart = { Downloads.startVideo(ctx, item, later = false) }, onRemove = { LaterStore.remove(item.url) })
                         }
+                    }
+                    items(videos, key = { "video-" + it.id }) { v ->
+                        VideoJobCard(
+                            v,
+                            onCancel = {
+                                val i = android.content.Intent(ctx, com.shekh.bddm.service.DownloadService::class.java).apply {
+                                    action = com.shekh.bddm.service.DownloadService.ACTION_CANCEL
+                                    putExtra(com.shekh.bddm.service.DownloadService.EXTRA_JOB_ID, v.id)
+                                }
+                                androidx.core.content.ContextCompat.startForegroundService(ctx, i)
+                            },
+                            onRetry = {
+                                VideoJobs.remove(v.id)
+                                Downloads.startVideo(ctx, PendingDownload(v.url, v.title, kind = PendingDownload.Kind.Video, qualityId = v.format, referer = v.referer), later = false)
+                            },
+                            onRemove = { VideoJobs.remove(v.id) },
+                        )
                     }
                     items(filtered, key = { it.id }) { job ->
                         JobCard(job, onClick = { onOpen(job) })
@@ -144,6 +174,53 @@ private fun LaterCard(item: PendingDownload, onStart: () -> Unit, onRemove: () -
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             TextButton(onClick = onRemove) { Text("Remove") }
             Button(onClick = onStart) { Text("Start") }
+        }
+    }
+}
+
+@Composable
+private fun VideoJobCard(v: VideoJob, onCancel: () -> Unit, onRetry: () -> Unit, onRemove: () -> Unit) {
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f), RoundedCornerShape(18.dp))
+            .padding(12.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(v.title.ifBlank { v.url }, fontWeight = FontWeight.SemiBold, fontSize = 14.sp,
+                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            StatusBadge(if (v.status == "Cancelled") "Error" else v.status)
+        }
+        Spacer(Modifier.height(8.dp))
+        if (v.active && v.percent <= 0f) {
+            LinearProgressIndicator(
+                modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(99.dp)),
+                color = AccentDark, trackColor = MaterialTheme.colorScheme.surfaceVariant, strokeCap = StrokeCap.Round,
+            )
+        } else {
+            LinearProgressIndicator(
+                progress = { (v.percent / 100f).coerceIn(0f, 1f) },
+                modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(99.dp)),
+                color = if (v.status == "Done") SuccessDark else AccentDark,
+                trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                strokeCap = StrokeCap.Round,
+            )
+        }
+        Spacer(Modifier.height(6.dp))
+        val meta = buildString {
+            append("Video")
+            if (v.status == "Downloading" && v.percent > 0f) append("  ·  ").append(v.percent.toInt()).append("%")
+            if (v.status == "Downloading" && v.eta > 0) append("  ·  ").append(formatEta(v.eta))
+            if (v.message.isNotBlank()) append("  ·  ").append(v.message)
+            if (v.status == "Done" && v.file.isNotBlank()) append("  ·  ").append(v.file.substringAfterLast('/'))
+        }
+        Text(meta, fontSize = 11.sp, color = if (v.status == "Error") DangerDark else MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            if (v.active) TextButton(onClick = onCancel) { Text("Cancel") }
+            else {
+                if (v.status == "Error" || v.status == "Cancelled") TextButton(onClick = onRetry) { Text("Retry") }
+                TextButton(onClick = onRemove) { Text("Remove") }
+            }
         }
     }
 }
@@ -332,6 +409,9 @@ fun ConfirmQueueSheet(
                     Column(Modifier.weight(1f)) {
                         Text(p.title, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(p.subtitle.ifBlank { p.url }, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        if (p.loading && p.formats.isEmpty()) {
+                            Text("Reading available qualities…", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                         if (p.formats.isNotEmpty()) {
                             var expanded by remember { mutableStateOf(false) }
                             val selected = p.formats.firstOrNull { it.id == p.qualityId } ?: p.formats.first()
