@@ -12,6 +12,16 @@ data class TabState(
     var incognito: Boolean = false,
     var lastUsed: Long = System.currentTimeMillis(),
     var blocked: Int = 0,
+    /** Tab that opened this one via window.open / target=_blank. Not persisted. */
+    var openerId: String? = null,
+    /** True when this tab was created as a popup, not by the user opening a new tab. */
+    var openedAsPopup: Boolean = false,
+    /** True after a real web page finished loading in this tab. */
+    var hasRealContent: Boolean = false,
+    /** True when the user typed or followed a link inside this tab after it opened. */
+    var userNavigated: Boolean = false,
+    /** True when the main document was turned into a download instead of a page. */
+    var mainFrameBecameDownload: Boolean = false,
 )
 
 data class Bookmark(val id: String, val title: String, val url: String, val added: Long)
@@ -25,18 +35,28 @@ class BrowserStore(ctx: Context, private val prefs: Prefs) {
     fun currentIndex(): Int = sp.getInt("current", 0).coerceIn(0, (tabs.size - 1).coerceAtLeast(0))
     fun setCurrent(i: Int) { sp.edit().putInt("current", i).apply() }
 
-    fun addTab(incognito: Boolean = false, url: String = ""): TabState {
-        val t = TabState(incognito = incognito, url = url, title = if (incognito) "Incognito" else "New tab")
+    fun addTab(incognito: Boolean = false, url: String = "", openerId: String? = null, openedAsPopup: Boolean = false): TabState {
+        val t = TabState(
+            incognito = incognito,
+            url = url,
+            title = if (incognito) "Incognito" else "New tab",
+            openerId = openerId,
+            openedAsPopup = openedAsPopup,
+        )
         tabs.add(t)
         setCurrent(tabs.lastIndex)
         saveTabs()
         return t
     }
 
-    fun closeTab(id: String) {
+    fun closeTab(id: String, selectId: String? = null) {
+        val currentId = tabs.getOrNull(currentIndex())?.id
         tabs.removeAll { it.id == id }
         if (tabs.isEmpty()) addTab()
-        if (currentIndex() >= tabs.size) setCurrent(tabs.lastIndex)
+        val next = DownloadTabPolicy.tabToShowAfterClose(tabs.map { it.id }, currentId, id, selectId)
+            ?: tabs.last().id
+        val i = tabs.indexOfFirst { it.id == next }.coerceAtLeast(0)
+        setCurrent(i)
         saveTabs()
     }
 

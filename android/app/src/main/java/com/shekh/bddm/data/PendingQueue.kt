@@ -26,6 +26,8 @@ data class PendingDownload(
     val size: Long = 0,
     /** Extra request headers (cookies, user agent) for the multi-part engine. Not persisted. */
     val headers: Map<String, String> = emptyMap(),
+    /** Browser tab that captured this file, used to close a download-only popup. */
+    val sourceTabId: String = "",
 ) {
     enum class Kind { File, Video }
 }

@@ -11,8 +11,8 @@ android {
         applicationId = "com.shekh.bddm"
         minSdk = 26
         targetSdk = 34
-        versionCode = 163
-        versionName = "1.6.3"
+        versionCode = 164
+        versionName = "1.6.4"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // arm64-v8a only (smaller APK; the updater only needs apkArm64).
         ndk { abiFilters += "arm64-v8a" }

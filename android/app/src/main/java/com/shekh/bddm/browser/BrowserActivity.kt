@@ -6,6 +6,7 @@ import android.graphics.Bitmap
 import android.os.Bundle
 import android.view.View
 import android.view.ViewGroup
+import android.widget.FrameLayout
 import android.webkit.*
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
@@ -63,6 +64,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 class BrowserActivity : ComponentActivity() {
     lateinit var store: BrowserStore
     var webView: WebView? = null
+    val tabViews = TabWebViews()
+    val ui = BrowserUi()
     var customView: View? = null
     var customCallback: WebChromeClient.CustomViewCallback? = null
     var hideSwitcher: (() -> Unit)? = null
@@ -99,6 +102,11 @@ class BrowserActivity : ComponentActivity() {
             }
         })
         setContent { BrowserRoot(this) }
+    }
+
+    override fun onDestroy() {
+        tabViews.clear()
+        super.onDestroy()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -192,36 +200,79 @@ fun BrowserRoot(act: BrowserActivity) {
         focusManager.clearFocus()
         keyboard?.hide()
         tab.url = url
+        tab.userNavigated = true
         store.touch(tab)
         act.trustedLoad = true
         act.webView?.loadUrl(url)
     }
 
-    fun openInNewTab(url: String) {
-        act.trustedLoad = true
-        store.addTab(url = url)
-        idx = store.currentIndex()
-        address = url
-        tabTick++
+    fun showTab(id: String) {
+        val i = store.tabs.indexOfFirst { it.id == id }
+        if (i < 0) return
+        idx = i
+        store.setCurrent(i)
+        address = store.tabs[i].url
     }
 
-    fun considerOpen(url: String) {
+    fun destroyTabView(id: String) {
+        act.tabViews.remove(id)
+        TabThumbs.delete(ctx, id)
+        MediaDetector.clear(id)
+    }
+
+    /** Close a download-only popup and return to its opener without reloading that page. */
+    fun closeDownloadPopup(id: String) {
+        val t = store.tabs.find { it.id == id } ?: return
+        if (!DownloadTabPolicy.shouldCloseAfterDownload(
+                t.openerId, t.openedAsPopup, t.hasRealContent, t.userNavigated, t.url, t.mainFrameBecameDownload,
+            )) return
+        val opener = t.openerId
+        destroyTabView(id)
+        store.closeTab(id, selectId = opener)
+        val i = store.currentIndex()
+        idx = i
+        address = store.tabs.getOrNull(i)?.url ?: ""
+    }
+
+    fun openInNewTab(url: String, asPopup: Boolean = false, fromTabId: String = tab.id) {
+        act.trustedLoad = true
+        val from = store.tabs.find { it.id == fromTabId }
+        store.addTab(
+            incognito = from?.incognito == true,
+            url = url,
+            openerId = if (asPopup) fromTabId else null,
+            openedAsPopup = asPopup,
+        )
+        idx = store.currentIndex()
+        address = url
+    }
+
+    fun considerOpen(url: String, fromTabId: String = tab.id) {
+        val from = store.tabs.find { it.id == fromTabId } ?: tab
         val toHost = OpenPolicy.normalize(AdBlocker.hostOf(url)) ?: return
-        val fromHost = OpenPolicy.normalize(AdBlocker.hostOf(tab.url)) ?: ""
-        if (fromHost.isBlank() || tab.url.isBlank() || tab.url.startsWith("about:")) {
-            openInNewTab(url)
+        val fromHost = OpenPolicy.normalize(AdBlocker.hostOf(from.url)) ?: ""
+        if (fromHost.isBlank() || from.url.isBlank() || from.url.startsWith("about:")) {
+            openInNewTab(url, asPopup = true, fromTabId = fromTabId)
             return
         }
         if (OpenPolicy.sameSite(fromHost, toHost)) {
-            openInNewTab(url)
+            openInNewTab(url, asPopup = true, fromTabId = fromTabId)
             return
         }
         when (prefs.openPolicy(fromHost)) {
-            OpenPolicy.ALLOW -> openInNewTab(url)
+            OpenPolicy.ALLOW -> openInNewTab(url, asPopup = true, fromTabId = fromTabId)
             OpenPolicy.BLOCK -> { }
             else -> pendingOpen = OpenRequest(fromHost, url, toHost)
         }
     }
+
+    act.ui.setAddress = { address = it }
+    act.ui.setBlocked = { blocked = it }
+    act.ui.snack = { snack = it }
+    act.ui.considerOpen = { fromId, u -> considerOpen(u, fromId) }
+    act.ui.onDownload = { id -> closeDownloadPopup(id) }
+    act.ui.onPopupCreated = { id -> showTab(id) }
+    act.ui.onFullscreen = { fullscreenTick++ }
 
     BDDMTheme(prefs.theme) {
         Box(Modifier.fillMaxSize()) {
@@ -349,172 +400,22 @@ fun BrowserRoot(act: BrowserActivity) {
                     }
                 }
                 Box(Modifier.weight(1f)) {
-                    key(tab.id, tabTick) {
-                        AndroidView(factory = { c ->
-                            WebView(c).apply {
-                                act.webView = this
-                                layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-                                settings.javaScriptEnabled = true
-                                settings.domStorageEnabled = true
-                                settings.databaseEnabled = true
-                                settings.mediaPlaybackRequiresUserGesture = false
-                                settings.allowFileAccess = false
-                                settings.loadsImagesAutomatically = true
-                                settings.setSupportMultipleWindows(true)
-                                settings.javaScriptCanOpenWindowsAutomatically = true
-                                settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                                settings.userAgentString = FilterEngine.chromeLikeUa(settings.userAgentString)
-                                setLayerType(View.LAYER_TYPE_HARDWARE, null)
-                                cookie(tab.incognito)
-                                val tabId = tab.id
-                                addJavascriptInterface(
-                                    DetectBridge(tabId, { tab.url }, { tab.title }, { u -> ad.isAdUrl(u, AdBlocker.hostOf(tab.url) ?: "") }),
-                                    MediaHooks.BRIDGE_NAME,
-                                )
-                                val docStart = MediaHooks.installDocumentStart(this)
-                                // Bug 108: WebView ignores downloads unless a listener takes them.
-                                setDownloadListener { dUrl, dUa, disposition, mime, length ->
-                                    if (dUrl.startsWith("blob:") || dUrl.startsWith("data:")) {
-                                        snack = "This file is created inside the page, so BDDM can't download it."
-                                        return@setDownloadListener
-                                    }
-                                    val name = URLUtil.guessFileName(dUrl, disposition, mime)
-                                    val headers = HashMap<String, String>()
-                                    if (!dUa.isNullOrBlank()) headers["User-Agent"] = FilterEngine.chromeLikeUa(dUa)
-                                    try { CookieManager.getInstance().getCookie(dUrl)?.let { if (it.isNotBlank()) headers["Cookie"] = it } } catch (_: Throwable) {}
-                                    val host = AdBlocker.hostOf(dUrl) ?: ""
-                                    PendingQueue.add(
-                                        PendingDownload(
-                                            url = dUrl,
-                                            title = name,
-                                            subtitle = listOfNotNull(host.ifBlank { null }, if (length > 0) formatBytes(length) else null, mime?.takeIf { it.isNotBlank() }).joinToString(" · "),
-                                            kind = PendingDownload.Kind.File,
-                                            referer = tab.url.takeIf { it.startsWith("http") } ?: "",
-                                            fileName = name,
-                                            size = length,
-                                            headers = headers,
-                                        )
-                                    )
-                                }
-                                webViewClient = object : WebViewClient() {
-                                    override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
-                                        val pageHost = AdBlocker.hostOf(tab.url) ?: request.url.host ?: ""
-                                        val blockedResp = ad.intercept(request, pageHost)
-                                        if (blockedResp != null) return blockedResp
-                                        try { recordRequest(tabId, request, pageHost, ad, tab.url) } catch (_: Throwable) {}
-                                        return null
-                                    }
-                                    override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
-                                        // Single-page apps change the address without loading a new document.
-                                        if (url == null || !url.startsWith("http") || isReload) return
-                                        if (url.substringBefore('#') == tab.url.substringBefore('#')) return
-                                        tab.url = url
-                                        address = url
-                                        MediaDetector.clear(tabId)
-                                        view?.evaluateJavascript("window.__bddmReset && window.__bddmReset();", null)
-                                        if (YtDlp.isSitePage(url) && MediaClassifier.isWatchPage(url)) {
-                                            MediaDetector.add(tabId, DetectedMedia(url, MediaKind.PAGE, MediaClassifier.titleFor(url, view?.title ?: ""), url, "spa"))
-                                        }
-                                        view?.postDelayed({ MediaHooks.rescan(view) }, 1200)
-                                    }
-                                    override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-                                        ad.resetPageCount()
-                                        blocked = 0
-                                        if (url != null && url.startsWith("http")) {
-                                            address = url
-                                            tab.url = url
-                                        }
-                                        if (!docStart) MediaHooks.inject(view)
-                                    }
-                                    override fun onPageFinished(view: WebView?, url: String?) {
-                                        act.trustedLoad = false
-                                        blocked = ad.blockedOnPage.get()
-                                        tab.blocked = blocked
-                                        if (url != null && url.startsWith("http")) {
-                                            tab.title = view?.title ?: url
-                                            tab.url = url
-                                            address = url
-                                            store.touch(tab)
-                                            if (!tab.incognito) store.addHistory(tab.title, url)
-                                        }
-                                        MediaHooks.inject(view)
-                                        MediaHooks.rescan(view)
-                                        MediaDetector.updateTitle(tabId, tab.title)
-                                        view?.postDelayed({
-                                            val bmp = view.let { TabThumbs.capture(it) }
-                                            if (bmp != null) TabThumbs.saveThumb(act, tab.id, bmp)
-                                        }, 400)
-                                    }
-                                    override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                                        val u = request?.url?.toString() ?: return false
-                                        if (u.startsWith("blob:") || u.startsWith("data:") ||
-                                            u.startsWith("about:") || u.startsWith("javascript:")) return false
-                                        if (!u.startsWith("http")) return true
-                                        if (request?.isForMainFrame != true) return false
-                                        if (act.trustedLoad) return false
-                                        val toHost = OpenPolicy.normalize(AdBlocker.hostOf(u))
-                                        val fromHost = OpenPolicy.normalize(AdBlocker.hostOf(tab.url))
-                                        if (toHost == null || fromHost == null || OpenPolicy.sameSite(fromHost, toHost)) return false
-                                        view?.post { considerOpen(u) }
-                                        return true
-                                    }
-                                }
-                                webChromeClient = object : WebChromeClient() {
-                                    override fun onCreateWindow(view: WebView?, isDialog: Boolean, isUserGesture: Boolean, resultMsg: android.os.Message?): Boolean {
-                                        if (prefs.blockPopups && !isUserGesture) return false
-                                        if (resultMsg == null) return false
-                                        val tmp = WebView(act).apply {
-                                            settings.javaScriptEnabled = true
-                                            webViewClient = object : WebViewClient() {
-                                                private fun capture(url: String?) {
-                                                    val u = url ?: return
-                                                    if (!u.startsWith("http")) return
-                                                    post {
-                                                        considerOpen(u)
-                                                        try { destroy() } catch (_: Exception) {}
-                                                    }
-                                                }
-                                                override fun shouldOverrideUrlLoading(v: WebView?, req: WebResourceRequest?): Boolean {
-                                                    capture(req?.url?.toString()); return true
-                                                }
-                                                override fun onPageStarted(v: WebView?, url: String?, favicon: Bitmap?) {
-                                                    if (url != null && url.startsWith("http")) capture(url)
-                                                }
-                                            }
-                                        }
-                                        val transport = resultMsg.obj as? WebView.WebViewTransport ?: return false
-                                        transport.webView = tmp
-                                        resultMsg.sendToTarget()
-                                        return true
-                                    }
-                                    override fun onReceivedTitle(view: WebView?, title: String?) {
-                                        if (!title.isNullOrBlank()) { tab.title = title; MediaDetector.updateTitle(tabId, title) }
-                                    }
-                                    override fun onReceivedIcon(view: WebView?, icon: Bitmap?) {
-                                        if (icon != null) TabThumbs.saveFavicon(act, tab.id, icon)
-                                    }
-                                    override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
-                                        act.customView = view
-                                        act.customCallback = callback
-                                        fullscreenTick++
-                                    }
-                                    override fun onHideCustomView() {
-                                        act.customView = null
-                                        act.customCallback?.onCustomViewHidden()
-                                        act.customCallback = null
-                                        fullscreenTick++
-                                    }
-                                    override fun onPermissionRequest(request: PermissionRequest?) {
-                                        val req = request ?: return
-                                        val grant = req.resources.filter { it == PermissionRequest.RESOURCE_PROTECTED_MEDIA_ID }
-                                        if (grant.isNotEmpty()) req.grant(grant.toTypedArray()) else req.deny()
-                                    }
-                                }
-                                act.trustedLoad = true
-                                loadUrl(tab.url.ifBlank { "about:blank" })
-                            }
-                        }, modifier = Modifier.fillMaxSize(), update = { wv -> act.webView = wv })
-                    }
+                    AndroidView(factory = { c ->
+                        FrameLayout(c).apply {
+                            layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+                        }
+                    }, modifier = Modifier.fillMaxSize(), update = { container ->
+                        val wv = act.tabViews.obtain(act, container.context, tab.id, loadUrl = true, url = tab.url)
+                        if (wv.parent !== container) {
+                            (wv.parent as? ViewGroup)?.removeView(wv)
+                            container.removeAllViews()
+                            container.addView(wv, FrameLayout.LayoutParams(
+                                ViewGroup.LayoutParams.MATCH_PARENT,
+                                ViewGroup.LayoutParams.MATCH_PARENT,
+                            ))
+                        }
+                        act.webView = wv
+                    })
                     if (suggestions.isNotEmpty() && addrFocused) {
                         SuggestionList(
                             suggestions,
@@ -586,13 +487,19 @@ fun BrowserRoot(act: BrowserActivity) {
             ConfirmQueueSheet(
                 items = pending,
                 onChange = { PendingQueue.update(it) },
-                onDismiss = { PendingQueue.close() },
+                onDismiss = {
+                    val ids = pending.map { it.sourceTabId }.filter { it.isNotBlank() }.distinct()
+                    PendingQueue.close()
+                    ids.forEach { closeDownloadPopup(it) }
+                },
                 onConfirm = { later ->
                     val selected = pending.filter { it.selected }
+                    val ids = pending.map { it.sourceTabId }.filter { it.isNotBlank() }.distinct()
                     PendingQueue.close()
                     selected.forEach { item ->
                         Downloads.startPending(ctx, item, later)
                     }
+                    ids.forEach { closeDownloadPopup(it) }
                 },
             )
         }
@@ -603,7 +510,7 @@ fun BrowserRoot(act: BrowserActivity) {
                 onOpen = { always ->
                     if (always) prefs.setOpenPolicy(openReq.fromHost, OpenPolicy.ALLOW)
                     pendingOpen = null
-                    openInNewTab(openReq.url)
+                    openInNewTab(openReq.url, asPopup = true)
                 },
                 onBlock = { always ->
                     if (always) prefs.setOpenPolicy(openReq.fromHost, OpenPolicy.BLOCK)
@@ -629,11 +536,10 @@ fun BrowserRoot(act: BrowserActivity) {
                     showTabs = false
                 },
                 onClose = { tSel ->
-                    TabThumbs.delete(ctx, tSel.id)
+                    destroyTabView(tSel.id)
                     store.closeTab(tSel.id)
                     idx = store.currentIndex()
                     address = store.tabs.getOrNull(idx)?.url ?: ""
-                    tabTick++
                 },
                 onNewTab = { incog ->
                     store.addTab(incognito = incog)
@@ -644,7 +550,7 @@ fun BrowserRoot(act: BrowserActivity) {
                 },
                 onCloseAll = {
                     val gone = store.tabs.filter { it.incognito == incognitoSpace }
-                    gone.forEach { TabThumbs.delete(ctx, it.id) }
+                    gone.forEach { destroyTabView(it.id) }
                     store.closeAll(incognitoOnly = incognitoSpace)
                     idx = store.currentIndex()
                     address = store.tabs.getOrNull(idx)?.url ?: ""
@@ -652,7 +558,7 @@ fun BrowserRoot(act: BrowserActivity) {
                     showTabs = false
                 },
                 onCloseOthers = {
-                    store.tabs.filter { it.id != tab.id }.forEach { TabThumbs.delete(ctx, it.id) }
+                    store.tabs.filter { it.id != tab.id }.forEach { destroyTabView(it.id) }
                     store.closeOthers(tab.id)
                     idx = store.currentIndex()
                     tabTick++
@@ -794,7 +700,7 @@ private fun preview(act: BrowserActivity, pick: MediaPick, onMessage: (String) -
 }
 
 /** Network-level capture: sees every request from every frame, including players that never touch the DOM. */
-private fun recordRequest(tabId: String, request: WebResourceRequest, pageHost: String, ad: AdBlocker, pageUrl: String) {
+internal fun recordRequest(tabId: String, request: WebResourceRequest, pageHost: String, ad: AdBlocker, pageUrl: String) {
     val u = request.url.toString()
     if (!u.startsWith("http")) return
     if (request.isForMainFrame) {
@@ -833,7 +739,7 @@ private suspend fun findAllOnPage(pageUrl: String, pageTitle: String): Int {
     return list.size
 }
 
-private fun WebView.cookie(incognito: Boolean) {
+internal fun WebView.cookie(incognito: Boolean) {
     val cm = CookieManager.getInstance()
     cm.setAcceptCookie(true)
     // Third-party cookies are required for embedded players (JW Player, YouTube embeds).
